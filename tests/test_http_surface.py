@@ -115,6 +115,24 @@ class TestDispatch(Base):
         self.assertEqual(code, 500)
         self.assertIn("kaboom", r.read().decode())
 
+    def test_a_session_lookup_that_throws_is_503_and_logged(self):
+        """The lookup runs before routing, outside any handler's try, so a raise
+        there used to close the connection with no status and no traceback: a
+        client sees "logged out", an operator sees nothing. It is a server fault
+        and has to say so, out loud."""
+        import contextlib
+        import io
+        from unittest import mock
+
+        noise = io.StringIO()
+        with mock.patch.object(auth, "session_user", side_effect=RuntimeError("db gone")):
+            with contextlib.redirect_stderr(noise):
+                code, r = self.status(self.get, "/library")
+        self.assertEqual(code, 503)
+        body = json.loads(r.read())
+        self.assertIn("db gone", body["error"])
+        self.assertIn("db gone", noise.getvalue())      # and it went in the log too
+
     def test_html_response_shape(self):
         r = self.get("/privacy")
         self.assertEqual(r.headers.get("Content-Type"), "text/html; charset=utf-8")
