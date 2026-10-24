@@ -67,7 +67,10 @@ class TestSignInAndLibrary(BrowserTest):
         self.assertFalse(self.page.is_visible("#libempty"))
 
         # and it is still there after a reload, because the shelf is the host's
-        # answer and not something the page kept in its own pocket
+        # answer and not something the page kept in its own pocket. Let the page
+        # go quiet first: a request straddling a reload is a test artefact, not
+        # a finding, and it shows up as a stray refusal in the console.
+        self.page.wait_for_load_state("networkidle")
         self.page.reload()
         self.wait_library(1)
         self.open_library()
