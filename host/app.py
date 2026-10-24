@@ -2181,7 +2181,19 @@ def make_handler(app):
                         body = json.loads(self.rfile.read(n).decode("utf-8"))
                     except ValueError:
                         return self.send_error(400)
-            q["_user"] = auth.session_user(app.conn, self._token()) or ""
+            # The session lookup sits outside the per-handler try on purpose: it
+            # runs before routing, so it has no handler to hand an error to. But
+            # an unguarded raise here closes the connection with no status and no
+            # traceback, which reads to a client as "logged out" and to an
+            # operator as nothing at all. A lookup that fails is a server fault,
+            # so say 503 and log it.
+            try:
+                q["_user"] = auth.session_user(app.conn, self._token()) or ""
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return self._json(503, {"error": "session lookup failed: %s: %s"
+                                                 % (type(e).__name__, e)})
             q["_token"] = self._token()
             if app.require_auth and path not in PUBLIC_ROUTES and not q["_user"]:
                 return self._json(401, {"error": "auth required"})

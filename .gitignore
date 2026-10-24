@@ -4,3 +4,4 @@ data/
 __pycache__/
 *.pyc
 .coverage
+tests_ui/_artifacts/
