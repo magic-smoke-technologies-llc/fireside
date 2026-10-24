@@ -1,0 +1,45 @@
+name: ui
+
+# UI tests are slow and browser-bound, so they never ride the default push/PR
+# run. They fire on demand (workflow_dispatch) or when a PR carries the `ui`
+# label. Keep them under tests_ui/, not tests/: the `test` job in ci.yml runs
+# `unittest discover -s tests`, so a suite parked outside it cannot leak into
+# the fast path by accident.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+jobs:
+  ui:
+    name: ui
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'ui')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Run UI tests
+        run: |
+          if [ ! -d tests_ui ]; then
+            echo "::notice::no tests_ui/ yet, nothing to run"
+            exit 0
+          fi
+          python -m unittest discover -s tests_ui -t . -v
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-failure-shots
+          path: tests_ui/_artifacts
+          if-no-files-found: ignore
+          retention-days: 7
