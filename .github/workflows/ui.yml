@@ -5,10 +5,22 @@ name: ui
 # label. Keep them under tests_ui/, not tests/: the `test` job in ci.yml runs
 # `unittest discover -s tests`, so a suite parked outside it cannot leak into
 # the fast path by accident.
+#
+# The suite starts a real host (`python3 -m host.app`, the container's own
+# entrypoint) over a temp data dir with the shell's FIRESIDE_* environment
+# stripped, then drives Chromium. No network, no Azure key, no seeded database:
+# every test makes its own account through the sign-in door.
 on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ui:
@@ -23,10 +35,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
+      - name: Install Playwright
         run: |
           python -m pip install --upgrade pip
-          pip install playwright
+          # pinned: the suite is written against this API and this browser build
+          pip install playwright==1.45.0
           python -m playwright install --with-deps chromium
       - name: Run UI tests
         run: |
