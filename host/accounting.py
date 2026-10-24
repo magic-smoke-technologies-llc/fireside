@@ -76,23 +76,32 @@ def reserve(conn, user_id, amount, currency="USD", job_id=None, note=""):
     amount = float(amount)
     if amount <= 0:
         raise ValueError("reserve amount must be positive")
+    # A SAVEPOINT, not BEGIN IMMEDIATE: the host serves requests from a thread
+    # pool over one shared connection, so a transaction opened here is the same
+    # transaction another thread is writing into. BEGIN IMMEDIATE raises
+    # "cannot start a transaction within a transaction" the moment a concurrent
+    # write is pending, and the ROLLBACK that used to follow discarded that
+    # other thread's work along with ours (a session row not yet committed, so
+    # the cookie the client already holds stops resolving). A savepoint nests,
+    # and rolling back to it undoes only what this reservation did.
+    save = "reserve_" + uuid.uuid4().hex[:12]
+    conn.execute("SAVEPOINT " + save)
     try:
-        conn.execute("BEGIN IMMEDIATE")
         avail = available(conn, user_id)
         if avail < amount:
-            conn.execute("ROLLBACK")
             raise Insufficient("available %.4f < %.4f" % (avail, amount))
         rid = uuid.uuid4().hex
         conn.execute(
             "INSERT INTO reservations(id,user_id,amount,currency,state,job_id,"
             "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
             (rid, user_id, amount, currency, "reserved", job_id or "", now(), now()))
-        conn.commit()
-        return rid
     except Exception:
-        if conn.in_transaction:
-            conn.execute("ROLLBACK")
+        conn.execute("ROLLBACK TO " + save)
+        conn.execute("RELEASE " + save)
         raise
+    conn.execute("RELEASE " + save)
+    conn.commit()
+    return rid
 
 
 def settle(conn, res_id, report):
