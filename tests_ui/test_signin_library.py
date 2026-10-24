@@ -53,7 +53,9 @@ class TestSignInAndLibrary(BrowserTest):
         self.page.click("#addbtn")
         wait_visible(self.page, "#exbtn")
         self.page.click("#exbtn")
+        # adding a book takes you to the book; the shelf is the thing under test
         self.wait_library(1)
+        self.open_library()
 
         books = self.library_via_host()
         self.assertEqual(len(books), 1, "the host does not agree the book was added")
@@ -68,6 +70,7 @@ class TestSignInAndLibrary(BrowserTest):
         # answer and not something the page kept in its own pocket
         self.page.reload()
         self.wait_library(1)
+        self.open_library()
         self.assertEqual([c["title"] for c in self.shelf()], [books[0]["title"]])
         self.assert_no_page_errors()
 
@@ -105,6 +108,7 @@ class TestSignInAndLibrary(BrowserTest):
         wait_visible(self.page, "#exbtn")
         self.page.click("#exbtn")
         self.wait_library(1)
+        self.open_library()
         owner_title = self.shelf()[0]["title"]
         self.sign_out()
 

@@ -301,6 +301,24 @@ class BrowserTest(unittest.TestCase):
         unexpected = [e for e in self.console_errors if not any(a in e for a in allowed)]
         self.assertEqual(unexpected, [], "the browser logged errors nobody asked for")
 
+    def open_library(self, timeout=20):
+        """The shelf is a tab, and adding a book navigates to the book when the
+        add finishes. So ask for the shelf, and ask again if the add flow moved
+        the page after the click: this is a person coming back to the shelf, not
+        a race with the app."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            self.page.click("#tabs button[data-v='lib']")
+            try:
+                wait_until(self.page, "() => !!document.querySelector('#v-lib.on')",
+                           timeout=4000)
+            except Exception:
+                continue
+            self.page.wait_for_timeout(300)      # let the add flow have its turn
+            if self.page.evaluate("() => !!document.querySelector('#v-lib.on')"):
+                return
+        raise AssertionError("the library tab would not stay open")
+
     def wait_library(self, count):
         """Wait for the shelf to have finished loading. #libempty is present from
         the start, so its inline display is the signal that loadLibrary ran:
