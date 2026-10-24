@@ -47,8 +47,9 @@ class LocalHost:
         self.data = tempfile.mkdtemp(prefix="fireside-ui-")
         self.plugins = plugins or PLUGINS
         self.port = _free_port()
+        self.logpath = os.path.join(self.data, "host.log")
         self.proc = None
-        self._output = ""
+        self._log = None
         self.start()
 
     # -- lifecycle ------------------------------------------------------------
@@ -61,12 +62,16 @@ class LocalHost:
             "PYTHONPATH": REPO,
             "PYTHONUNBUFFERED": "1",
         })
+        # the child's output goes to a file, not a pipe: a pipe we only read
+        # after the process dies is useless at the moment we most want it, which
+        # is while it is still running and misbehaving
+        self._log = open(self.logpath, "w", encoding="utf-8")
         self.proc = subprocess.Popen(
             [sys.executable, "-m", "host.app",
              "--host", "127.0.0.1", "--port", str(self.port),
              "--data", self.data, "--plugins", self.plugins],
             cwd=REPO, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            stdout=self._log, stderr=subprocess.STDOUT, text=True)
         self._wait_health()
 
     def _wait_health(self, timeout=90):
@@ -85,14 +90,19 @@ class LocalHost:
         raise RuntimeError("host never answered /health on port %d\n%s"
                            % (self.port, self.drain()))
 
+    def tail(self, limit=4000):
+        """What the host has printed so far. Safe while it is still running."""
+        try:
+            with open(self.logpath, "r", encoding="utf-8", errors="replace") as f:
+                return f.read()[-limit:]
+        except OSError:
+            return ""
+
     def drain(self):
-        """Everything the child has printed so far (only safe once it is dead)."""
-        if self.proc and self.proc.stdout and self.proc.poll() is not None:
-            try:
-                self._output += self.proc.stdout.read() or ""
-            except Exception:
-                pass
-        return self._output
+        return self.tail(limit=100000)
+
+    def alive(self):
+        return self.proc is not None and self.proc.poll() is None
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -102,6 +112,11 @@ class LocalHost:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
                 self.proc.wait(timeout=10)
+        if self._log:
+            try:
+                self._log.close()
+            except Exception:
+                pass
         try:
             import shutil
             shutil.rmtree(self.data, ignore_errors=True)
@@ -326,7 +341,9 @@ class BrowserTest(unittest.TestCase):
         unexpected = [e for e in self.console_errors if not any(a in e for a in allowed)]
         self.assertEqual(unexpected, [],
                          "the browser logged errors nobody asked for\nrefused: %r\ncookies: %r"
-                         % (self.refused, sorted(cookie_jar(self.context))))
+                         "\nhost alive: %r\nhost log:\n%s"
+                         % (self.refused, sorted(cookie_jar(self.context)),
+                            self.host.alive(), self.host.tail()))
 
     def open_library(self, timeout=20):
         """The shelf is a tab, and adding a book navigates to the book when the
