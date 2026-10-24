@@ -339,10 +339,16 @@ class BrowserTest(unittest.TestCase):
         self.assertEqual(self.page_errors, [], "the page threw while we were testing it")
         allowed = tuple(allow_console)
         unexpected = [e for e in self.console_errors if not any(a in e for a in allowed)]
+        jar = cookie_jar(self.context)
+        try:
+            now = self.host.request("/me", cookies=jar)
+        except Exception as exc:                 # the host itself may be gone
+            now = repr(exc)
         self.assertEqual(unexpected, [],
-                         "the browser logged errors nobody asked for\nrefused: %r\ncookies: %r"
+                         "the browser logged errors nobody asked for\nrefused: %r"
+                         "\ncookies: %r\n/me with those cookies now: %r"
                          "\nhost alive: %r\nhost log:\n%s"
-                         % (self.refused, sorted(cookie_jar(self.context)),
+                         % (self.refused, sorted(jar), now,
                             self.host.alive(), self.host.tail()))
 
     def open_library(self, timeout=20):
