@@ -214,8 +214,10 @@ class BrowserTest(unittest.TestCase):
         self.page = self.context.new_page()
         self.page_errors = []          # uncaught exceptions: always a defect
         self.console_errors = []       # console.error: sometimes the expected refusal
+        self.refused = []              # (status, url) for every 4xx/5xx the page saw
         self.page.on("pageerror", lambda e: self.page_errors.append(str(e)))
         self.page.on("console", self._on_console)
+        self.page.on("response", self._on_response)
 
     def tearDown(self):
         # A screenshot on failure is the difference between a red CI run and a
@@ -236,6 +238,10 @@ class BrowserTest(unittest.TestCase):
             self.context.close()
         finally:
             self.host.stop()
+
+    def _on_response(self, response):
+        if response.status >= 400:
+            self.refused.append((response.status, response.url))
 
     def _on_console(self, message):
         if message.type != "error" or "favicon" in message.text:
@@ -318,7 +324,9 @@ class BrowserTest(unittest.TestCase):
         self.assertEqual(self.page_errors, [], "the page threw while we were testing it")
         allowed = tuple(allow_console)
         unexpected = [e for e in self.console_errors if not any(a in e for a in allowed)]
-        self.assertEqual(unexpected, [], "the browser logged errors nobody asked for")
+        self.assertEqual(unexpected, [],
+                         "the browser logged errors nobody asked for\nrefused: %r\ncookies: %r"
+                         % (self.refused, sorted(cookie_jar(self.context))))
 
     def open_library(self, timeout=20):
         """The shelf is a tab, and adding a book navigates to the book when the
