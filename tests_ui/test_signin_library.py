@@ -24,7 +24,7 @@ class TestSignInAndLibrary(BrowserTest):
         first visitor who is offered "sign in" to an account that does not exist
         has nothing to type."""
         self.open_site()
-        wait_visible(self.page, "#lock")
+        self.wait_door_rendered()
         self.assertEqual(self.page.text_content("#locktitle").strip(), "set up fireside")
         self.assertEqual(self.page.text_content("#lockgo").strip(), "Create account")
         self.assertTrue(self.page.is_visible("#lockemailwrap"),
@@ -82,7 +82,7 @@ class TestSignInAndLibrary(BrowserTest):
         self.sign_out()
 
         self.open_site()
-        wait_visible(self.page, "#lock")
+        self.wait_door_rendered()
         self.assertEqual(self.page.text_content("#locktitle").strip(), "sign in")
         self.page.fill("#lockuser", "ui_door")
         self.page.fill("#lockpass", "not-the-password")
@@ -117,7 +117,7 @@ class TestSignInAndLibrary(BrowserTest):
         self.sign_out()
 
         self.open_site()
-        wait_visible(self.page, "#lock")
+        self.wait_door_rendered()
         self.page.click("#locktoggle")           # "Create a new account"
         wait_until(self.page, "() => document.querySelector('#locktitle').textContent.trim() === 'set up fireside'")
         self.page.fill("#lockuser", "ui_guest")

@@ -207,6 +207,8 @@ class BrowserTest(unittest.TestCase):
             cls.playwright.stop()
 
     def setUp(self):
+        result = getattr(self._outcome, "result", None)
+        self._errors_before = len(result.errors) + len(result.failures) if result else 0
         self.host = LocalHost()
         self.context = self.browser.new_context(viewport={"width": 1280, "height": 900})
         self.page = self.context.new_page()
@@ -218,14 +220,18 @@ class BrowserTest(unittest.TestCase):
     def tearDown(self):
         # A screenshot on failure is the difference between a red CI run and a
         # five-minute mystery. CI uploads tests_ui/_artifacts when the job fails.
-        failed = not getattr(self._outcome, "success", True)
-        if failed:
+        result = getattr(self._outcome, "result", None)
+        errors_now = len(result.errors) + len(result.failures) if result else 0
+        if result and errors_now > self._errors_before:
             try:
                 os.makedirs(ARTIFACTS, exist_ok=True)
                 name = "%s-%s.png" % (type(self).__name__, self._testMethodName)
                 self.page.screenshot(path=os.path.join(ARTIFACTS, name), full_page=True)
-            except Exception:
-                pass
+                with open(os.path.join(ARTIFACTS, name.replace(".png", ".html")),
+                          "w", encoding="utf-8") as f:
+                    f.write(self.page.content())
+            except Exception as exc:      # never let the evidence-gathering hide the error
+                print("could not save failure artifacts: %r" % (exc,))
         try:
             self.context.close()
         finally:
@@ -242,12 +248,19 @@ class BrowserTest(unittest.TestCase):
         wait_until(self.page, "() => document.readyState === 'complete'")
         return self.page
 
+    def wait_door_rendered(self):
+        """The door is drawn from /auth/policy, so its static HTML is not the
+        state: #locksub only gets text once the host has answered. Reading the
+        title before that is reading the wrong thing, and clicking the toggle
+        then lands on the wrong mode."""
+        wait_visible(self.page, "#lock")
+        wait_until(self.page, "() => document.querySelector('#locksub')"
+                              ".textContent.trim().length > 0")
+
     def register(self, username, password="bench-correction-1", email=None):
         """Create an account through the door itself, not through the API."""
         self.open_site()
-        wait_visible(self.page, "#lock")
-        wait_until(self.page, "() => document.querySelector('#locktitle')"
-                               ".textContent.trim().length > 0")
+        self.wait_door_rendered()
         if self.page.text_content("#locktitle").strip() != "set up fireside":
             # an account already exists on this host: take the create toggle
             self.page.click("#locktoggle")
@@ -261,7 +274,7 @@ class BrowserTest(unittest.TestCase):
 
     def sign_in(self, username, password="bench-correction-1"):
         self.open_site()
-        wait_visible(self.page, "#lock")
+        self.wait_door_rendered()
         self.page.fill("#lockuser", username)
         self.page.fill("#lockpass", password)
         self.page.click("#lockgo")
