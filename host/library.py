@@ -180,6 +180,17 @@ def find_by_meta(conn, user_id, key, value):
 def list_books(conn, user_id):
     rows = conn.execute(
         "SELECT * FROM books WHERE user_id=? ORDER BY created_at DESC", (user_id,))
+    # The shelf is the one place a series has to be visible as a container, so
+    # memberships ride along with the books in two queries instead of two per
+    # book. Places are stored 0-based and reported 1-based, same as the panel.
+    mine = {}
+    for m in conn.execute(
+            "SELECT b.book_id, s.id, s.name, b.place FROM series_books b"
+            " JOIN series s ON s.id=b.series_id WHERE s.user_id=?", (user_id,)):
+        mine.setdefault(m["book_id"], []).append(
+            {"id": m["id"], "name": m["name"], "place": (m["place"] or 0) + 1})
+    counts = {r["id"]: r["c"] for r in conn.execute(
+        "SELECT series_id id, COUNT(*) c FROM series_books GROUP BY series_id")}
     out = []
     for r in rows:
         n = conn.execute("SELECT COUNT(*) c FROM chapters WHERE book_id=?",
@@ -190,7 +201,9 @@ def list_books(conn, user_id):
         out.append({"id": r["id"], "title": r["title"],
                     "author": (r["author"] or ""),
                     "created_at": r["created_at"], "chapters": n, "rendered": done,
-                    "cover": r["cover_ref"] or ""})
+                    "cover": r["cover_ref"] or "",
+                    "series": [dict(s, count=counts.get(s["id"], 1))
+                               for s in mine.get(r["id"], [])]})
     return out
 
 
@@ -204,6 +217,7 @@ def get_book(conn, book_id):
             "cover": r["cover_ref"] or "", "cover_mime": r["cover_mime"] or "",
             "author": r["author"] or "", "publisher": r["publisher"] or "",
             "published": r["published"] or "", "description": r["description"] or "",
+            "user_edited": 1 if r["user_edited"] else 0,
             # the ISBN column is where it lives now; an old row may still carry
             # one in its source metadata, so fall back to that.
             "isbn": (r["isbn"] or "") or (meta or {}).get("isbn", "")}
@@ -223,6 +237,168 @@ def set_details(conn, book_id, **fields):
     conn.execute("UPDATE books SET %s WHERE id=?" % sets,
                  tuple(fields[c] for c in cols) + (book_id,))
     conn.commit()
+
+
+def set_user_details(conn, book_id, **fields):
+    """The reader edited the metadata by hand.
+
+    Same columns, but it also raises `user_edited`, which is the difference
+    between "the reader typed this" and "a lookup filled this in". Once it is
+    raised, a fresh ISBN lookup is a suggestion the reader has to accept, not
+    something that lands on top of their fix.
+    """
+    cols = [k for k in _DETAIL_FIELDS if k in fields]
+    sets = ["%s=?" % c for c in cols] + ["user_edited=1"]
+    conn.execute("UPDATE books SET %s WHERE id=?" % ",".join(sets),
+                 tuple(fields[c] for c in cols) + (book_id,))
+    conn.commit()
+
+
+# ---- series ---------------------------------------------------------------
+# A series is a named container a reader creates and hangs their own books on,
+# in an order. It is local to the account; nothing here is published. Membership
+# is its own row carrying a `place`, so a book's position is a number you can
+# move and the same book in a second series later is one more row rather than a
+# schema change. The order only ever affects display: nothing about audio,
+# identity or replacement reads it.
+
+SERIES_MAX_NAME = 120
+
+
+def _own_series(conn, user_id, series_id):
+    return conn.execute("SELECT id,name FROM series WHERE id=? AND user_id=?",
+                        (series_id, user_id)).fetchone()
+
+
+def create_series(conn, user_id, name):
+    name = " ".join(str(name or "").split())[:SERIES_MAX_NAME]
+    if not name:
+        return None
+    sid = uuid.uuid4().hex
+    conn.execute("INSERT INTO series(id,user_id,name,created_at) VALUES(?,?,?,?)",
+                 (sid, user_id, name, now()))
+    conn.commit()
+    return sid
+
+
+def list_series(conn, user_id):
+    rows = conn.execute(
+        "SELECT id,name,created_at FROM series WHERE user_id=? ORDER BY name,created_at",
+        (user_id,)).fetchall()
+    out = []
+    for r in rows:
+        n = conn.execute("SELECT COUNT(*) c FROM series_books WHERE series_id=?",
+                         (r["id"],)).fetchone()["c"]
+        out.append({"id": r["id"], "name": r["name"], "books": n,
+                    "created_at": r["created_at"]})
+    return out
+
+
+def rename_series(conn, user_id, series_id, name):
+    name = " ".join(str(name or "").split())[:SERIES_MAX_NAME]
+    if not name or not _own_series(conn, user_id, series_id):
+        return False
+    conn.execute("UPDATE series SET name=? WHERE id=? AND user_id=?",
+                 (name, series_id, user_id))
+    conn.commit()
+    return True
+
+
+def delete_series(conn, user_id, series_id):
+    """Drop the container, never the books in it. Memberships go with it."""
+    if not _own_series(conn, user_id, series_id):
+        return False
+    conn.execute("DELETE FROM series_books WHERE series_id=?", (series_id,))
+    conn.execute("DELETE FROM series WHERE id=? AND user_id=?", (series_id, user_id))
+    conn.commit()
+    return True
+
+
+def series_of(conn, book_id):
+    """Every series this book sits in, nearest name first. One is the rule for
+    now; a list is what the schema already allows."""
+    rows = conn.execute(
+        "SELECT s.id,s.name,b.place FROM series_books b JOIN series s ON s.id=b.series_id"
+        " WHERE b.book_id=? ORDER BY s.name", (book_id,)).fetchall()
+    out = []
+    for r in rows:
+        n = conn.execute("SELECT COUNT(*) c FROM series_books WHERE series_id=?",
+                         (r["id"],)).fetchone()["c"]
+        # `place` is stored 0-based (cheap to renumber, safe to sort); the
+        # panel and the reader think in 1-based "book 2 of 5".
+        out.append({"id": r["id"], "name": r["name"], "place": (r["place"] or 0) + 1,
+                    "count": n})
+    return out
+
+
+def _renumber(conn, series_id):
+    rows = conn.execute(
+        "SELECT book_id,place FROM series_books WHERE series_id=? ORDER BY place",
+        (series_id,)).fetchall()
+    for i, r in enumerate(rows):
+        if r["place"] != i:
+            conn.execute("UPDATE series_books SET place=? WHERE series_id=? AND book_id=?",
+                         (i, series_id, r["book_id"]))
+
+
+def set_book_series(conn, user_id, book_id, series_id):
+    """Put a book in a series (appended at the end) or take it out.
+
+    An empty series_id removes the book from every series it is in, which is
+    what the panel's one dropdown means by "no series". A non-empty one wins
+    over any other membership, because a book has one series this release.
+    """
+    own = conn.execute("SELECT id FROM books WHERE id=? AND user_id=?",
+                       (book_id, user_id)).fetchone()
+    if not own:
+        return False
+    series_id = (series_id or "").strip()
+    if not series_id:
+        left = [r["series_id"] for r in conn.execute(
+            "SELECT series_id FROM series_books WHERE book_id=?", (book_id,))]
+        conn.execute("DELETE FROM series_books WHERE book_id=?", (book_id,))
+        for sid in left:                 # keep the survivors' places contiguous
+            _renumber(conn, sid)
+        conn.commit()
+        return True
+    if not _own_series(conn, user_id, series_id):
+        return False
+    already = conn.execute(
+        "SELECT place FROM series_books WHERE series_id=? AND book_id=?",
+        (series_id, book_id)).fetchone()
+    conn.execute("DELETE FROM series_books WHERE book_id=? AND series_id<>?",
+                 (book_id, series_id))
+    if not already:
+        nxt = conn.execute("SELECT COALESCE(MAX(place),-1)+1 n FROM series_books"
+                           " WHERE series_id=?", (series_id,)).fetchone()["n"]
+        conn.execute("INSERT INTO series_books(series_id,book_id,place) VALUES(?,?,?)",
+                     (series_id, book_id, nxt))
+    _renumber(conn, series_id)
+    conn.commit()
+    return True
+
+
+def move_in_series(conn, user_id, series_id, book_id, step):
+    """Move one book up or down inside its series. Neighbours swap places; the
+    books at the ends stay put. Returns True when something moved."""
+    if not _own_series(conn, user_id, series_id):
+        return False
+    rows = conn.execute(
+        "SELECT book_id,place FROM series_books WHERE series_id=? ORDER BY place",
+        (series_id,)).fetchall()
+    ids = [r["book_id"] for r in rows]
+    if book_id not in ids:
+        return False
+    i = ids.index(book_id)
+    j = i + (1 if int(step or 0) > 0 else -1)
+    if j < 0 or j >= len(ids):
+        return False
+    ids[i], ids[j] = ids[j], ids[i]
+    for k, bid in enumerate(ids):
+        conn.execute("UPDATE series_books SET place=? WHERE series_id=? AND book_id=?",
+                     (k, series_id, bid))
+    conn.commit()
+    return True
 
 
 # ---- cover art ------------------------------------------------------------

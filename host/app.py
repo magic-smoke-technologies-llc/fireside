@@ -745,7 +745,72 @@ class App:
                 "author": b.get("author", ""), "cover": b.get("cover", ""),
                 "isbn": b.get("isbn", ""), "publisher": b.get("publisher", ""),
                 "published": b.get("published", ""),
-                "description": b.get("description", "")}
+                "description": b.get("description", ""),
+                "user_edited": b.get("user_edited", 0),
+                "series": library.series_of(self.conn, book_id)}
+
+    # ---- metadata + series ----------------------------------------------------
+    # Two calls with a sharp line between them. /book/details looks facts up by
+    # ISBN; /book/meta is the reader typing over them. Only the second raises
+    # user_edited, which is what makes a later lookup stop being authoritative.
+
+    def book_meta_set(self, q, body):
+        book_id = body.get("book", "")
+        b = library.get_book(self.conn, book_id)
+        if not b or b.get("user_id") != self._uid(q, body):
+            return 404, {"error": "no such book"}
+        fields = {}
+        for k in ("title", "author"):
+            if k in body:
+                fields[k] = " ".join(str(body[k] or "").split())[:255]
+        if not fields:
+            return 400, {"error": "nothing to save"}
+        if "title" in fields and not fields["title"]:
+            return 400, {"error": "a book needs a title"}
+        library.set_user_details(self.conn, book_id, **fields)
+        return 200, {"ok": True, "book": self._book_payload(book_id)}
+
+    def series_list(self, q, body):
+        return 200, {"series": library.list_series(self.conn, self._uid(q, body))}
+
+    def series_save(self, q, body):
+        """create / rename / delete. A series is a local container; deleting it
+        never deletes a book."""
+        uid = self._uid(q, body)
+        op = (body.get("op") or "create").strip()
+        if op == "create":
+            sid = library.create_series(self.conn, uid, body.get("name"))
+            if not sid:
+                return 400, {"error": "a series needs a name"}
+        elif op == "rename":
+            if not library.rename_series(self.conn, uid, body.get("id", ""), body.get("name")):
+                return 404, {"error": "no such series"}
+        elif op == "delete":
+            if not library.delete_series(self.conn, uid, body.get("id", "")):
+                return 404, {"error": "no such series"}
+        else:
+            return 400, {"error": "unknown op"}
+        return 200, {"ok": True, "series": library.list_series(self.conn, uid)}
+
+    def book_series_set(self, q, body):
+        """Put this book in a series (at the end) or take it out."""
+        book_id = body.get("book", "")
+        if not library.set_book_series(self.conn, self._uid(q, body), book_id,
+                                       body.get("series", "")):
+            return 404, {"error": "no such book or series"}
+        return 200, {"ok": True, "book": self._book_payload(book_id)}
+
+    def series_move(self, q, body):
+        """Up or down one place inside the series. `dir` is -1 or 1."""
+        series_id = body.get("series", "")
+        try:
+            step = int(body.get("dir", 0))
+        except (TypeError, ValueError):
+            step = 0
+        moved = library.move_in_series(self.conn, self._uid(q, body), series_id,
+                                      body.get("book", ""), step)
+        return 200, {"ok": True, "moved": bool(moved),
+                     "book": self._book_payload(body.get("book", ""))}
 
     @staticmethod
     def _no_reader(req):
@@ -1786,6 +1851,7 @@ GET_ROUTES = {
     "/icon-maskable-512.png": "icon_maskable",
     "/privacy": "privacy", "/terms": "terms", "/delete-account": "delete_account",
     "/health": "health", "/plugins": "plugins", "/library": "library_list",
+    "/series": "series_list",
     "/job": "job", "/jobs": "jobs_list", "/progress": "progress", "/chapter": "chapter",
     "/estimate": "estimate",
     "/position": "get_position", "/last": "last_position", "/stop": "stop", "/text": "text",
@@ -1811,7 +1877,9 @@ POST_ROUTES = {
     "/account/password": "account_password",
     "/speak": "speak",
     "/cover": "put_cover", "/cover/auto": "cover_auto", "/cover/clear": "clear_cover",
-    "/book/details": "fetch_details",
+    "/book/details": "fetch_details", "/book/meta": "book_meta_set",
+    "/book/series": "book_series_set",
+    "/series": "series_save", "/series/move": "series_move",
     "/position": "put_position", "/claim": "claim", "/ack": "ack",
     "/listen": "listen", "/cancel": "cancel_job",
     "/credential": "put_credential", "/auth/registration": "set_registration",
@@ -2174,7 +2242,19 @@ def make_handler(app):
                         body = json.loads(self.rfile.read(n).decode("utf-8"))
                     except ValueError:
                         return self.send_error(400)
-            q["_user"] = auth.session_user(app.conn, self._token()) or ""
+            # The session lookup sits outside the per-handler try on purpose: it
+            # runs before routing, so it has no handler to hand an error to. But
+            # an unguarded raise here closes the connection with no status and no
+            # traceback, which reads to a client as "logged out" and to an
+            # operator as nothing at all. A lookup that fails is a server fault,
+            # so say 503 and log it.
+            try:
+                q["_user"] = auth.session_user(app.conn, self._token()) or ""
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return self._json(503, {"error": "session lookup failed: %s: %s"
+                                                 % (type(e).__name__, e)})
             q["_token"] = self._token()
             if app.require_auth and path not in PUBLIC_ROUTES and not q["_user"]:
                 return self._json(401, {"error": "auth required"})

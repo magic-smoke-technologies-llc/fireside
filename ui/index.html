@@ -88,6 +88,11 @@
   .bk{cursor:pointer;max-width:170px}
   .bk .cover{aspect-ratio:2/3;font-size:14px;margin-bottom:8px;max-width:170px}
   .bk .spine{margin:8px 0 6px}
+  /* a series on the shelf: a name over its books, in your order */
+  .serieshd{grid-column:1/-1;display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--line);padding-bottom:8px;margin:18px 0 0}
+  .serieshd .sname{font:600 15px/1.2 var(--serif);color:var(--text)}
+  .serieshd .sbtn{margin-left:0;opacity:.85}
+  .serieshd .sbtn:first-of-type{margin-left:auto}
   /* playing */
   .np{display:grid;grid-template-columns:1fr 260px;gap:40px}
   .story p{font:19px/1.75 var(--serif);color:var(--soft);margin-top:18px;max-width:62ch}
@@ -742,6 +747,17 @@
   <div class="sheet" role="dialog" aria-modal="true" aria-label="Book settings">
     <h3>Book settings</h3>
     <p class="small" id="stitle"></p>
+    <label>Title</label>
+    <div class="setrow">
+      <input type="text" id="stitlein" autocomplete="off" placeholder="Book title">
+      <button class="btn quiet" id="seditbtn" type="button" hidden>Edit</button>
+      <button class="btn quiet" id="ssavemeta" type="button">Save</button>
+    </div>
+    <label>Author</label>
+    <div class="setrow">
+      <input type="text" id="sauthorin" autocomplete="off" placeholder="Who wrote it">
+    </div>
+    <p class="small" id="smetanote" style="margin-top:6px" hidden></p>
     <label>ISBN</label>
     <div class="setrow">
       <input type="text" id="sisbn" placeholder="978…" autocomplete="off" inputmode="numeric">
@@ -749,6 +765,16 @@
     </div>
     <p class="small" id="snote" style="margin-top:6px"></p>
     <div id="smeta" class="smeta" hidden></div>
+    <label style="margin-top:14px">Series</label>
+    <div class="setrow">
+      <select id="sseries"></select>
+    </div>
+    <div class="setrow" id="sseriesord" hidden>
+      <button class="btn quiet" id="sseriesup" type="button" aria-label="Move earlier">↑</button>
+      <button class="btn quiet" id="sseriesdn" type="button" aria-label="Move later">↓</button>
+      <span class="small" id="sseriespos"></span>
+    </div>
+    <p class="small" id="sseriesnote" style="margin-top:6px" hidden></p>
     <label style="margin-top:14px">Cover</label>
     <div class="coverprev" id="scovprev"></div>
     <div class="setrow">
@@ -2380,6 +2406,41 @@ function spineEl(states, curIdx) {
   states.forEach((s, i) => { const it = document.createElement('i'); it.className = s + (i === curIdx ? ' cur' : ''); d.append(it); });
   return d;
 }
+function shelfCell(b) {
+  const cell = document.createElement('div'); cell.className = 'bk'; cell.onclick = () => { openBook(b.id); show('play'); };
+  const cover = document.createElement('div'); cover.className = 'cover'; fillCover(cover, b.id, b.title, b.cover);
+  const t = document.createElement('div'); t.style.cssText = 'font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; t.textContent = b.title;
+  const states = Array.from({ length: b.chapters }, (_, i) => i < b.rendered ? 'avail' : 'todo');
+  const sp = spineEl(states, -1);
+  const s = document.createElement('div'); s.className = 'small'; s.textContent = b.rendered + ' of ' + b.chapters + ' voiced';
+  cell.append(cover, t, sp, s);
+  return cell;
+}
+// A series you can see, not just a field in one book's settings: its name over
+// its books in your order, and the loose books after it. Rename and delete live
+// here because this is where the container is a thing rather than a dropdown.
+function seriesHead(g) {
+  const hd = document.createElement('div'); hd.className = 'serieshd';
+  const name = document.createElement('div'); name.className = 'sname'; name.textContent = g.name;
+  const n = document.createElement('div'); n.className = 'small';
+  n.textContent = g.count === 1 ? '1 book' : g.count + ' books';
+  const ren = document.createElement('button'); ren.type = 'button'; ren.className = 'btn quiet sbtn'; ren.textContent = 'Rename';
+  ren.onclick = async (ev) => {
+    ev.stopPropagation();
+    const v = (prompt('Rename the series', g.name) || '').trim(); if (!v || v === g.name) return;
+    try { await jpost('/series', { op: 'rename', id: g.id, name: v, user: USER }); await loadLibrary(); }
+    catch (e) { fail(e); }
+  };
+  const del = document.createElement('button'); del.type = 'button'; del.className = 'btn quiet sbtn'; del.textContent = 'Delete';
+  del.onclick = async (ev) => {
+    ev.stopPropagation();
+    if (!confirm('Delete the series “' + g.name + '”? The books stay on your shelf.')) return;
+    try { await jpost('/series', { op: 'delete', id: g.id, user: USER }); await loadLibrary(); }
+    catch (e) { fail(e); }
+  };
+  hd.append(name, n, ren, del);
+  return hd;
+}
 async function loadLibrary() {
   if (!USER) return;
   try {
@@ -2388,15 +2449,21 @@ async function loadLibrary() {
     $('#shelflabel').style.display = books.length ? 'block' : 'none';
     $('#libempty').style.display = books.length ? 'none' : 'block';
     $('#legend').style.display = books.length ? 'flex' : 'none';
+    const groups = [], loose = [];
     books.forEach(b => {
-      const cell = document.createElement('div'); cell.className = 'bk'; cell.onclick = () => { openBook(b.id); show('play'); };
-      const cover = document.createElement('div'); cover.className = 'cover'; fillCover(cover, b.id, b.title, b.cover);
-      const t = document.createElement('div'); t.style.cssText = 'font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; t.textContent = b.title;
-      const states = Array.from({ length: b.chapters }, (_, i) => i < b.rendered ? 'avail' : 'todo');
-      const sp = spineEl(states, -1);
-      const s = document.createElement('div'); s.className = 'small'; s.textContent = b.rendered + ' of ' + b.chapters + ' voiced';
-      cell.append(cover, t, sp, s); shelf.append(cell);
+      const s = (b.series || [])[0];
+      if (!s) { loose.push(b); return; }
+      let g = groups.find(x => x.id === s.id);
+      if (!g) { g = { id: s.id, name: s.name, count: s.count || 1, items: [] }; groups.push(g); }
+      g.items.push({ b, place: s.place || 1 });
     });
+    groups.sort((a, b) => a.name.localeCompare(b.name));
+    groups.forEach(g => {
+      g.items.sort((x, y) => x.place - y.place);
+      shelf.append(seriesHead(g));
+      g.items.forEach(it => shelf.append(shelfCell(it.b)));
+    });
+    loose.forEach(b => shelf.append(shelfCell(b)));
     renderResume();
     renderWelcome();
   } catch (e) { /* library is optional until a name is set */ }
@@ -3122,13 +3189,103 @@ $('#convertbtn').onclick = openConvert;
 
 function openSettings() {
   if (!book) return;
+  EDIT_META = false;
   $('#stitle').textContent = book.title || '';
   $('#sisbn').value = book.isbn || '';
   $('#snote').textContent = '';
   $('#scovurl').value = '';
   renderSettings();
+  loadSeries();
   $('#settingsdlg').hidden = false;
 }
+// ---- series ---------------------------------------------------------------
+// A series is a local container you make and put books in, in an order. Nothing
+// is published. The dropdown is the whole UI: it names the series this book is
+// in (or None), lists the ones you have, and always ends with "Create series".
+let SERIES = [];
+let EDIT_META = false;
+const NEW_SERIES = '__new';
+
+async function loadSeries() {
+  try {
+    const r = await (await fetch('/series?user=' + encodeURIComponent(USER))).json();
+    SERIES = r.series || [];
+  } catch (e) { SERIES = []; }
+  renderSeries();
+}
+function renderSeries() {
+  const sel = $('#sseries'); if (!sel) return;
+  const mine = book && (book.series || [])[0];
+  sel.innerHTML = '';
+  const none = document.createElement('option');
+  none.value = ''; none.textContent = 'No series';
+  sel.append(none);
+  SERIES.forEach(s => {
+    const o = document.createElement('option'); o.value = s.id;
+    o.textContent = s.name + (mine && mine.id === s.id ? '  (' + mine.place + ' of ' + mine.count + ')' : '');
+    sel.append(o);
+  });
+  const mk = document.createElement('option');
+  mk.value = NEW_SERIES; mk.textContent = '＋ Create series…';
+  sel.append(mk);
+  sel.value = mine ? mine.id : '';
+  const ord = $('#sseriesord'), pos = $('#sseriespos');
+  ord.hidden = !mine;
+  if (mine) {
+    pos.textContent = 'Book ' + mine.place + ' of ' + mine.count;
+    $('#sseriesup').disabled = mine.place <= 1;
+    $('#sseriesdn').disabled = mine.place >= mine.count;
+  }
+}
+async function saveSeries(value) {
+  if (!book) return;
+  $('#err').textContent = ''; busy('Saving the series…');
+  try {
+    const r = await jpost('/book/series', { book: book.id, series: value });
+    book.series = (r.book || {}).series || [];
+    await settingsReload();
+    idle(value ? 'Series updated.' : 'Taken out of the series.');
+  } catch (err) { fail(err); renderSeries(); }
+}
+$('#sseries').onchange = async () => {
+  const v = $('#sseries').value;
+  if (v !== NEW_SERIES) { await saveSeries(v); return; }
+  const name = (prompt('Name the series') || '').trim();
+  if (!name) { renderSeries(); return; }
+  $('#err').textContent = ''; busy('Creating the series…');
+  try {
+    const r = await jpost('/series', { op: 'create', name });
+    SERIES = r.series || [];
+    const made = SERIES.filter(s => s.name === name).pop();
+    await saveSeries(made ? made.id : '');
+  } catch (err) { fail(err); renderSeries(); }
+};
+const moveSeries = dir => async () => {
+  const mine = book && (book.series || [])[0];
+  if (!mine) return;
+  $('#err').textContent = '';
+  try {
+    const r = await jpost('/series/move', { series: mine.id, book: book.id, dir });
+    book.series = (r.book || {}).series || [];
+    await settingsReload();
+  } catch (err) { fail(err); }
+};
+$('#sseriesup').onclick = moveSeries(-1);
+$('#sseriesdn').onclick = moveSeries(1);
+$('#seditbtn').onclick = () => { EDIT_META = true; renderSettings(); };
+$('#ssavemeta').onclick = async () => {
+  if (!book) return;
+  $('#err').textContent = '';
+  const title = ($('#stitlein').value || '').trim();
+  const author = ($('#sauthorin').value || '').trim();
+  if (!title) { fail(failure('A book needs a title.')); return; }
+  busy('Saving the details…');
+  try {
+    await jpost('/book/meta', { book: book.id, title, author });
+    EDIT_META = false;
+    await settingsReload('Details saved.');
+  } catch (err) { fail(err); }
+};
 function renderSettings() {
   const prev = $('#scovprev'); prev.innerHTML = '';
   if (book && book.cover) {
@@ -3138,6 +3295,23 @@ function renderSettings() {
     const d = document.createElement('div'); d.className = 'none'; d.textContent = 'No cover yet';
     prev.append(d);
   }
+  // Looked-up metadata is authoritative until the reader says otherwise. With
+  // an ISBN on the book the fields are locked and changing them takes the Edit
+  // step; the moment they do, user_edited is raised and the lock is gone for
+  // good, because a fresh lookup must not land on their fix.
+  const locked = !!(book && book.isbn && !book.user_edited && !EDIT_META);
+  const ti = $('#stitlein'), ai = $('#sauthorin');
+  ti.value = (book && book.title) || '';
+  ai.value = (book && book.author) || '';
+  ti.disabled = locked; ai.disabled = locked;
+  $('#seditbtn').hidden = !locked;
+  $('#ssavemeta').hidden = locked;
+  const note = $('#smetanote');
+  note.hidden = !locked;
+  note.textContent = locked
+    ? 'These came from the ISBN. Press Edit to change them; your version then wins over any future lookup.'
+    : '';
+  renderSeries();
   $('#scovrmbtn').hidden = !(book && book.cover);
   $('#scovautobtn').hidden = !((book && book.isbn) || ($('#sisbn').value || '').trim());
   const meta = $('#smeta'); meta.innerHTML = '';

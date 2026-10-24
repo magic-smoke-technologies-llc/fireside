@@ -48,6 +48,12 @@ CREATE TABLE IF NOT EXISTS chapters (
     text_ref VARCHAR(255), audio_ref VARCHAR(255), audio_bytes INT, duration_s DOUBLE,
     provider VARCHAR(64), voice VARCHAR(128), model VARCHAR(128), speed DOUBLE,
     PRIMARY KEY (book_id, idx));
+CREATE TABLE IF NOT EXISTS series (
+    id VARCHAR(128) PRIMARY KEY, user_id VARCHAR(128), name VARCHAR(255),
+    created_at VARCHAR(32));
+CREATE TABLE IF NOT EXISTS series_books (
+    series_id VARCHAR(128), book_id VARCHAR(128), place INT,
+    PRIMARY KEY (series_id, book_id));
 CREATE TABLE IF NOT EXISTS render_cache (
     `key` VARCHAR(191) PRIMARY KEY, audio_ref VARCHAR(255), audio_bytes INT,
     duration_s DOUBLE, provider VARCHAR(64), voice VARCHAR(128),
@@ -250,6 +256,9 @@ _ADDED_COLUMNS = [
     ("books", "publisher", "VARCHAR(255) DEFAULT ''"),
     ("books", "published", "VARCHAR(64) DEFAULT ''"),
     ("books", "description", "TEXT"),
+    # a reader changed the looked-up metadata by hand, so a later lookup must
+    # never quietly decide it knows better.
+    ("books", "user_edited", "INT DEFAULT 0"),
     ("user_prefs", "pron", "TEXT"),
     # how the player reads along: highlight, scroll, scroll mode. JSON, because
     # it is one small bag of preferences and not a thing anything else queries.
@@ -291,11 +300,111 @@ def connect(path=None):
             path = url[len("sqlite://"):] or None
         else:
             path = url
-    conn = sqlite3.connect(sqlite_path(path), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
+    conn = SQLiteConnection(sqlite_path(path))
     conn.executescript(SCHEMA)
     conn.commit()
     return migrate(conn)
+
+
+class Result:
+    """The rows one statement produced, already in memory.
+
+    sqlite3 hands back a live cursor that owns its statement, and a cursor is
+    only safe while nobody else touches the connection. On a host that serves
+    requests from a thread pool over one shared connection, another thread's
+    execute() between our execute() and our fetchall() is exactly how a reader
+    gets an InterfaceError ("bad parameter or other API misuse") or an empty
+    answer for a row that is sitting right there. Reading the rows out while
+    the lock is still held makes the statement and its results one indivisible
+    step, so the caller's cursor cannot be taken out from under it.
+
+    Shaped like the subset of DB-API the host actually uses: fetchone,
+    fetchall, iteration, rowcount, lastrowid.
+    """
+
+    def __init__(self, rows, rowcount, lastrowid):
+        self._rows = rows
+        self._at = 0
+        self.rowcount = rowcount
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        if self._at >= len(self._rows):
+            return None
+        row = self._rows[self._at]
+        self._at += 1
+        return row
+
+    def fetchall(self):
+        rest = self._rows[self._at:]
+        self._at = len(self._rows)
+        return rest
+
+    def __iter__(self):
+        rest = self.fetchall()
+        return iter(rest)
+
+    def __len__(self):
+        return len(self._rows)
+
+
+class SQLiteConnection:
+    """One SQLite connection, safe to share across request threads.
+
+    The host is a ThreadingHTTPServer and every thread reaches for the same
+    App.conn, so statements from different threads land on one sqlite3
+    connection at the same time. sqlite3 releases the GIL around a statement,
+    which makes that interleaving real, and CPython's connection object is not
+    built for it: the symptom is intermittent, not loud. A SELECT for a session
+    that exists comes back empty (the page decides the reader is logged out and
+    puts the sign-in door back over their books) or raises InterfaceError
+    ("bad parameter or other API misuse", which the session lookup turns into a
+    503). Neither reproduces on one core, which is why it looked like a CI
+    ghost: it needs two statements in flight at once.
+
+    So every statement runs under one lock and its rows are read out before the
+    lock is released. That is the same decision MySQLConnection makes above,
+    for the same reason: for a household server, one statement at a time is
+    exactly the right amount of concurrency control, and correctness at this
+    layer is worth more than parallel reads on a book library.
+
+    Transactions stay connection-wide (commit commits, rollback rolls back),
+    which is what every module already assumes. Callers that need to undo only
+    their own work should use a SAVEPOINT rather than a bare ROLLBACK: a
+    connection-wide rollback also discards whatever another thread had pending.
+    """
+
+    def __init__(self, path):
+        self._lock = threading.RLock()
+        self._raw = sqlite3.connect(path, check_same_thread=False)
+        self._raw.row_factory = sqlite3.Row
+
+    def execute(self, sql, params=()):
+        with self._lock:
+            cur = self._raw.execute(sql, tuple(params) if params else ())
+            rows = cur.fetchall()
+            return Result(rows, cur.rowcount, cur.lastrowid)
+
+    def executescript(self, script):
+        with self._lock:
+            self._raw.executescript(script)
+
+    def commit(self):
+        with self._lock:
+            self._raw.commit()
+
+    def rollback(self):
+        with self._lock:
+            self._raw.rollback()
+
+    @property
+    def in_transaction(self):
+        with self._lock:
+            return self._raw.in_transaction
+
+    def close(self):
+        with self._lock:
+            self._raw.close()
 
 
 def now():
