@@ -97,8 +97,9 @@ class TestSignInAndLibrary(BrowserTest):
         self.page.click("#lockgo")
         self.wait_in_app()
         self.wait_library(0)
-        # the 401 the wrong password earned is the only console error we accept
-        self.assert_no_page_errors(allow_console=("401",))
+        # the one refusal this test earned, and it has to be that route
+        self.assert_no_page_errors(allow_console=("401 (Unauthorized) [http://127.0.0.1:%d/auth/local/login]"
+                                                  % self.host.port,))
 
     def test_one_account_cannot_see_another_shelf(self):
         """The second account is the test. It proves the shelf is scoped to the

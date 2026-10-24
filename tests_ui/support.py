@@ -234,7 +234,8 @@ class BrowserTest(unittest.TestCase):
     def _on_console(self, message):
         if message.type != "error" or "favicon" in message.text:
             return
-        self.console_errors.append(message.text)
+        where = (message.location or {}).get("url", "") if message.location else ""
+        self.console_errors.append("%s [%s]" % (message.text, where))
 
     def open_site(self):
         self.page.goto(self.host.url("/"))
@@ -292,10 +293,15 @@ class BrowserTest(unittest.TestCase):
         return body or []
 
     def assert_no_page_errors(self, allow_console=()):
-        """No uncaught exception, and no console error outside what the test
-        deliberately provoked. The page installs its own window error handler
-        that pulls the sign-in door back over the app, so an uncaught throw
-        during boot shows up as a suspiciously empty screen, not a crash."""
+        """No uncaught exception anywhere, and no console error the test did not
+        ask for. The page installs its own window error handler that pulls the
+        sign-in door back over the app, so an uncaught throw during boot shows up
+        as a suspiciously empty screen rather than a crash.
+
+        A refused request is logged by the browser with its URL, so an allowance
+        is a substring of that message and never a blanket "ignore errors": a
+        401 on /auth/local/login is a test refusing on purpose, a 401 anywhere
+        else is the app lying about its session."""
         self.assertEqual(self.page_errors, [], "the page threw while we were testing it")
         allowed = tuple(allow_console)
         unexpected = [e for e in self.console_errors if not any(a in e for a in allowed)]
