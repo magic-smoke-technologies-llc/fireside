@@ -18,7 +18,9 @@ PLUGINS = os.path.join(ROOT, "plugins")
 class TestReaderTree(unittest.TestCase):
     def test_specific_sources_first_generic_last(self):
         ids = [p.id for p in discover("reader", PLUGINS)]
-        self.assertEqual(ids, ["epub", "ao3", "quantumbang", "web"])
+        # pdf first: its magic bytes are unambiguous. Then docx before epub,
+        # because both are zips and the docx reader asks a narrower question.
+        self.assertEqual(ids, ["pdf", "docx", "epub", "ao3", "quantumbang", "web"])
 
     def test_reader_objects_expose_the_contract(self):
         for p in discover("reader", PLUGINS):

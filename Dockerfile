@@ -1,7 +1,11 @@
 FROM python:3.12-slim
 WORKDIR /app
-# MySQL backend support; SQLite is the default and needs no extra package
-RUN pip install --no-cache-dir pymysql==1.1.1 cryptography==43.0.3
+# MySQL backend support; SQLite is the default and needs no extra package.
+# pypdf + pdfminer.six are the PDF importer (PyMuPDF is AGPL and is not in here
+# on purpose). python-docx is not needed: docx is read from its own zip parts.
+# pins live in requirements.txt so CI installs exactly what the image runs
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 ENV PYTHONUNBUFFERED=1 \
     FIRESIDE_DATA=/data \

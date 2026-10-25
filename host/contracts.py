@@ -62,6 +62,30 @@ class Audio:
     mime: str = "audio/mpeg"
 
 
+class Refused(Exception):
+    """A plugin's clean refusal: not a crash, a reason the caller can show.
+
+    A scanned PDF has no text layer; a reader that cannot read the file should
+    say so in the user's language, not raise a stack trace the host turns into
+    a 500. `status` is the HTTP status the host should answer with (422 for
+    "this file is readable as a file but not as a book").
+    """
+
+    def __init__(self, error: str, detail: str = "", status: int = 422, **extra):
+        super().__init__(detail or error)
+        self.error = error
+        self.detail = detail
+        self.status = status
+        self.extra = extra
+
+    def payload(self) -> Dict[str, Any]:
+        out = {"error": self.error}
+        if self.detail:
+            out["detail"] = self.detail
+        out.update(self.extra or {})
+        return out
+
+
 @dataclass
 class Consent:
     ok: bool = True

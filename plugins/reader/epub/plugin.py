@@ -11,7 +11,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from host.contracts import Field, to_book
+from host.contracts import Field, Refused, to_book
 
 
 import io
@@ -172,10 +172,39 @@ class Epub:
     label = "EPUB file"
 
     def matches(self, req) -> bool:
-        return req.get("kind") == "upload"
+        """Any upload? Not any more: epub, pdf and docx all arrive as uploads,
+        and only one of them should claim the bytes. An epub is a zip with a
+        META-INF/container.xml; a docx is a zip with word/document.xml and no
+        container. Asking by content means a .docx renamed .epub still imports
+        correctly, and an extension is never the whole answer."""
+        if req.get("kind") != "upload":
+            return False
+        data = req.get("data") or b""
+        if data[:5] == b"%PDF-":
+            return False
+        if data[:4] != b"PK\x03\x04":
+            # A bare .epub extension on something that is not a zip: let it
+            # through only if the name says so, so the parse can refuse it with
+            # a real message instead of "no reader matched".
+            return (req.get("filename") or "").lower().endswith(".epub")
+        try:
+            names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+        except (zipfile.BadZipFile, OSError):
+            # Not a zip at all. Claim it only if the name says epub, so the
+            # parse can refuse it with a reason instead of the host answering
+            # "no reader matched" for a file that was plainly meant to be one.
+            return (req.get("filename") or "").lower().endswith(".epub")
+        if "META-INF/container.xml" in names:
+            return True
+        return not any(n == "word/document.xml" for n in names)
 
     def read(self, req, fetch, cred=None) -> dict:
-        book = parse_epub(req["data"], req.get("filename") or "book.epub")
+        try:
+            book = parse_epub(req["data"], req.get("filename") or "book.epub")
+        except (zipfile.BadZipFile, OSError, KeyError) as e:
+            # A truncated download or a renamed file is a bad file, not a crash.
+            raise Refused("not an epub",
+                          "this file could not be opened as an epub (%s)" % type(e).__name__)
         book["meta"] = {"source": self.id}
         if book.get("isbn"):
             book["meta"]["isbn"] = book["isbn"]

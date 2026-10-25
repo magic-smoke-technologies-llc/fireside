@@ -29,16 +29,21 @@ becomes its admin, and everything after that is a toggle on the admin screen.
 State (the SQLite database and the audio blobs) lives in `./data`, mapped to
 `/data` in the container, so an update never loses your library.
 
-### No Docker, no install
+### No Docker: Python and one install step
 
 The default backend is SQLite and the default storage is the local disk, so the
-only requirement is Python 3.8+:
+server itself needs nothing but Python 3.8+:
 
+    pip install -r requirements.txt
     python3 -m host.app
     # open http://127.0.0.1:8788
 
-No `pip install` for this path. (MySQL/MariaDB support and the browser-fetch
-source backend do need extra packages; see *Backends* below.)
+The pinned list is short and split by need. `pypdf` and `pdfminer.six` are the
+PDF reader; `pymysql` and `cryptography` are MySQL/MariaDB and the Azure
+backends. Skip the install and EPUB, DOCX and web imports still work, because
+those dependencies are loaded only when a PDF actually arrives, and a PDF import
+without them says which package is missing instead of failing silently. See
+*Backends* below for the database settings.
 
 ### What you see first
 

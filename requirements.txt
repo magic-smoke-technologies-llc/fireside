@@ -1,0 +1,7 @@
+# runtime dependencies (the app is stdlib-first on purpose, so the list is short)
+pymysql==1.1.1
+cryptography==43.0.3
+# PDF importer. PyMuPDF is AGPL and is deliberately not here; pypdf and
+# pdfminer.six are BSD/Apache and fine for a hosted commercial product.
+pypdf==6.19.0
+pdfminer.six==20260107

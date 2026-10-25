@@ -37,7 +37,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from host.host import Host
-from host import accounting, auth, billing, connections, credentials, db, erase, example, grants, jobs, library, mailer, payments, playback, plans, pron, quota, reading, stats
+from host import accounting, auth, billing, connections, contracts, credentials, db, draft as drafts, erase, example, grants, jobs, library, mailer, payments, playback, plans, pron, quota, reading, stats
 from host.egress import fetch as _fetch
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -234,6 +234,45 @@ class App:
     def library_list(self, q, body):
         return 200, library.list_books(self.conn, self._uid(q, None))
 
+    def preview_import(self, q, body):
+        """Read the file, decide nothing, write nothing.
+
+        The user drops a PDF, waits for the parse, and looks at what the machine
+        thinks the chapters and paragraphs are before a single character is
+        charged. Nothing touches the shelf here, so a bad parse costs no storage
+        and leaves no half-book behind. Duplicate detection still runs, because
+        finding out after the preview that you already own this book is worse
+        than finding out at the start.
+        """
+        user = self._uid(q, body)
+        req = {"kind": body.get("kind", "url"), "url": body.get("url"),
+               "filename": body.get("filename"),
+               "data": base64.b64decode(body["data_b64"]) if body.get("data_b64") else None}
+        plugin = self._pick_reader(req)
+        if plugin is None:
+            return 400, self._no_reader(req)
+        cred = self._source_cred(user, plugin.id, body.get("cred"))
+        try:
+            book = plugin.obj.read(req, self._make_fetch(plugin.obj, cred), cred)
+        except contracts.Refused as e:
+            return e.status, e.payload()
+        parsed = (getattr(book, "meta", None) or {}).get("draft")
+        if not parsed:
+            # A reader that does not produce a block-level draft (epub, ao3, web)
+            # gets no preview: inventing one would mean re-parsing its text here
+            # and the two parsers would disagree.
+            return 200, {"preview": None, "source": plugin.id,
+                         "title": getattr(book, "title", ""),
+                         "chapters": len(getattr(book, "chapters", [])),
+                         "detail": "this reader imports directly; no preview"}
+        out = drafts.draft_summary(parsed, plugin.id)
+        existing = library.find_same(self.conn, user,
+                                     getattr(book, "meta", None) or {}, plugin.obj)
+        if existing:
+            held = library.get_book(self.conn, existing) or {}
+            out["existing"] = {"book_id": existing, "title": held.get("title") or ""}
+        return 200, {"preview": out}
+
     def import_book(self, q, body):
         user = self._uid(q, body)
         req = {"kind": body.get("kind", "url"), "url": body.get("url"),
@@ -241,9 +280,14 @@ class App:
                "data": base64.b64decode(body["data_b64"]) if body.get("data_b64") else None}
         plugin = self._pick_reader(req)
         if plugin is None:
-            return 400, {"error": "no reader matched"}
+            return 400, self._no_reader(req)
         cred = self._source_cred(user, plugin.id, body.get("cred"))
-        book = plugin.obj.read(req, self._make_fetch(plugin.obj, cred), cred)
+        try:
+            book = plugin.obj.read(req, self._make_fetch(plugin.obj, cred), cred)
+        except contracts.Refused as e:
+            # A plugin that can read the file but not turn it into a book says
+            # so in its own words. That is a 422 with a reason, not a 500.
+            return e.status, e.payload()
         # Whatever identity the reader named, this account either already holds
         # that work or it does not. Importing again is a replace, not a second
         # copy: two of the same book on one shelf is a mistake, not a collection.
@@ -767,6 +811,23 @@ class App:
                                       body.get("book", ""), step)
         return 200, {"ok": True, "moved": bool(moved),
                      "book": self._book_payload(body.get("book", ""))}
+
+    @staticmethod
+    def _no_reader(req):
+        """Why nothing claimed this upload, in words a person can act on.
+
+        "no reader matched" is true and useless. If the name says a format we
+        do read, the file is the problem, not the format.
+        """
+        name = (req.get("filename") or "").lower()
+        for ext, what in ((".pdf", "a PDF"), (".docx", "a Word document"),
+                          (".epub", "an EPUB")):
+            if name.endswith(ext):
+                return {"error": "could not read this file",
+                        "detail": "this upload does not open as %s. It may be "
+                                  "truncated or renamed." % what}
+        return {"error": "no reader matched",
+                "detail": "nothing here reads that file type"}
 
     def _pick_reader(self, req):
         for p in self.host.readers:
@@ -1809,7 +1870,7 @@ GET_ROUTES = {
     "/storage": "storage_get",
 }
 POST_ROUTES = {
-    "/import": "import_book", "/book/example": "add_example_book",
+    "/import": "import_book", "/import/preview": "preview_import", "/book/example": "add_example_book",
     "/render": "render", "/voices": "voices",
     "/book/renditions/delete": "remove_renditions", "/book/delete": "delete_book",
     "/account/delete": "account_delete",

@@ -279,7 +279,7 @@ class TestRegistry(unittest.TestCase):
     def test_describe_covers_every_source(self):
         d = describe()
         ids = [s["id"] for s in d]
-        self.assertEqual(ids, ["epub", "ao3", "quantumbang", "web"])
+        self.assertEqual(ids, ["pdf", "docx", "epub", "ao3", "quantumbang", "web"])
         for s in d:
             self.assertIn("settings", s)
             self.assertIn("credential_hosts", s)

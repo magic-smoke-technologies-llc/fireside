@@ -1,0 +1,9 @@
+{
+  "id": "docx",
+  "kind": "reader",
+  "label": "Word document",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Docx",
+  "order": 7
+}

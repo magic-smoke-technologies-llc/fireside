@@ -1,0 +1,9 @@
+{
+  "id": "pdf",
+  "kind": "reader",
+  "label": "PDF file",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Pdf",
+  "order": 6
+}

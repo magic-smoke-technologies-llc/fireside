@@ -25,8 +25,13 @@ def add_book(conn, storage, user_id, book):
     book_id = book.id or uuid.uuid4().hex
     meta = dict(book.meta or {})
     conn.execute(
-        "INSERT INTO books(id,user_id,title,source_json,created_at) VALUES(?,?,?,?,?)",
-        (book_id, user_id, book.title, json.dumps(meta), now()))
+        # The author is metadata the reader already extracted. Writing it to
+        # the column is what makes the shelf able to show it without parsing
+        # source_json per row.
+        "INSERT INTO books(id,user_id,title,source_json,author,created_at)"
+        " VALUES(?,?,?,?,?,?)",
+        (book_id, user_id, book.title, json.dumps(meta), meta.get("author", ""),
+         now()))
     for i, ch in enumerate(book.chapters):
         text = ch.text if isinstance(ch.text, str) else str(ch.text)
         ref = storage.put(text.encode("utf-8"))
@@ -144,10 +149,12 @@ def replace_book(conn, storage, book_id, book):
     # Title: the shelf already belongs to this account and may have been
     # renamed from the book page, so an empty title is the only one the import
     # fills. The rest of the description is the reader's to bring.
-    row = conn.execute("SELECT title FROM books WHERE id=?", (book_id,)).fetchone()
+    row = conn.execute("SELECT title,author FROM books WHERE id=?", (book_id,)).fetchone()
     title = (row["title"] if row and row["title"] else book.title) or "Untitled"
-    conn.execute("UPDATE books SET title=?,source_json=? WHERE id=?",
-                 (title, json.dumps(meta), book_id))
+    author = (row["author"] if "author" in row.keys() and row["author"]
+              else meta.get("author", ""))
+    conn.execute("UPDATE books SET title=?,source_json=?,author=? WHERE id=?",
+                 (title, json.dumps(meta), author, book_id))
     conn.commit()
     freed = gc_blobs(conn, storage, refs)
     return {"kept_renditions": kept, "dropped_renditions": dropped, "freed": freed}
