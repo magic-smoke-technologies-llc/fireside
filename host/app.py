@@ -39,7 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from host.host import Host
 import inspect
 
-from host import accounting, auth, billing, connections, contracts, credentials, db, draft as drafts, erase, example, grants, jobs, library, mailer, payments, playback, plans, pron, quota, ratelimit, reading, stats
+from host import accounting, auth, billing, connections, contracts, credentials, db, draft as drafts, erase, example, grants, i18n, jobs, library, mailer, payments, playback, plans, pron, quota, ratelimit, reading, stats
 from host.egress import fetch as _fetch
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -309,7 +309,20 @@ class App:
         """Serve the browser client. The host owns its own UI; plugins ship none."""
         with open(os.path.join(UI_DIR, "index.html"), "r", encoding="utf-8") as f:
             page = f.read().replace("__HOST_VERSION__", HOST_VERSION)
-        return 200, {"_html": page}
+        # localisable: the handler picks the language and splices the catalog in,
+        # because only the request knows the cookie and Accept-Language.
+        return 200, {"_html": page, "_locale": True}
+
+    def i18n_js(self, q, body):
+        """The client half of i18n: T(), data-t application, language switch.
+
+        Cached hard: it changes only when we ship, and it is on the critical
+        path of the first paint.
+        """
+        with open(os.path.join(UI_DIR, "i18n.js"), "r", encoding="utf-8") as f:
+            src = f.read().encode("utf-8")
+        return 200, {"_raw": src, "_mime": "application/javascript; charset=utf-8",
+                     "_cache": "public, max-age=600"}
 
     def _legal(self, name):
         """A public, static legal page a store listing or payment processor can mine."""
@@ -2215,7 +2228,7 @@ class App:
 
 
 GET_ROUTES = {
-    "/": "ui", "/index.html": "ui", "/favicon.ico": "favicon",
+    "/": "ui", "/index.html": "ui", "/favicon.ico": "favicon", "/i18n.js": "i18n_js",
     "/manifest.webmanifest": "manifest", "/sw.js": "service_worker",
     "/icon-192.png": "icon192", "/icon-512.png": "icon512",
     "/icon-maskable-512.png": "icon_maskable",
@@ -2268,7 +2281,7 @@ POST_ROUTES = {
 
 # reachable without a session even when auth is required: the page, its health,
 # the sign-in surface, and the browser's cache of who it is.
-PUBLIC_ROUTES = {"/", "/index.html", "/favicon.ico", "/health", "/auth/providers",
+PUBLIC_ROUTES = {"/", "/index.html", "/i18n.js", "/favicon.ico", "/health", "/auth/providers",
                  "/auth/policy", "/auth/forgot", "/auth/reset", "/me", "/plans",
                  "/privacy", "/terms", "/delete-account",
                  "/manifest.webmanifest", "/sw.js",
@@ -2672,6 +2685,9 @@ def make_handler(app):
             q["_base"] = self._base_url()
             q["_ip"] = self._ip()
             q["_idem"] = (self.headers.get("Idempotency-Key") or "").strip()[:191]
+            # language: ?lang= then the fs_lang cookie then Accept-Language
+            q["_lang"] = i18n.negotiate(q.get("lang"), self._cookie(i18n.COOKIE),
+                                        self.headers.get("Accept-Language"))
             if app.require_auth and path not in PUBLIC_ROUTES and not q["_user"]:
                 return self._json(401, {"error": "auth required"})
             try:
@@ -2679,7 +2695,10 @@ def make_handler(app):
             except Exception as e:
                 return self._json(500, {"error": "%s: %s" % (type(e).__name__, e)})
             if isinstance(payload, dict) and "_html" in payload:
-                raw = payload["_html"].encode("utf-8")
+                page = payload["_html"]
+                if payload.get("_locale"):
+                    page = i18n.inject(page, code=q.get("_lang"))
+                raw = page.encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
@@ -2691,6 +2710,8 @@ def make_handler(app):
                 self.send_response(status)
                 self.send_header("Content-Type", payload.get("_mime", "application/octet-stream"))
                 self.send_header("Content-Length", str(len(raw)))
+                if payload.get("_cache"):
+                    self.send_header("Cache-Control", payload["_cache"])
                 self.send_header("X-Checksum", payload.get("checksum", ""))
                 self.end_headers()
                 self.wfile.write(raw)

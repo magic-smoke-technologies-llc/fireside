@@ -243,7 +243,8 @@ class TestBootSafetyNet(unittest.TestCase):
         # a first-run user must be told what fireside is on the door, not only
         # in a manifest no user reads.
         html = self._html()
-        self.assertIn('<p class="tag">Books and web stories, voiced.</p>', html)
+        # the sentence is also the translation key, so it carries data-t
+        self.assertIn('data-t="Books and web stories, voiced.">Books and web stories, voiced.</p>', html)
 
     def test_signin_errors_are_generic(self):
         # the brief's rule: never say which half was wrong
