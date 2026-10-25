@@ -1599,11 +1599,17 @@ async function loadCredits() {
     : '0 characters. A render through the metered voice will be refused until you buy capacity.';
   if (held > 0) box.textContent += ' \u00b7 ' + nchar(held) + ' held by a run in progress.';
   const sale = d.sale;
+  // The sentence follows the shape the server actually sent. A null rate used to
+  // mean "price unknown" even when priced buttons sat right underneath it; now a
+  // server with only bundles says so instead of guessing about a missing field.
+  const priced = !!(sale && (sale.bundles || []).some(b => b && b.usd != null));
   $('#creditsrate').textContent = !sale
     ? 'No voice server is selling characters right now, so there is nothing to buy here. Your own connected voices still work.'
-    : (sale.rate_per_1m_chars == null
-      ? 'This voice server does not publish a rate, so the price is only known at checkout.'
-      : 'Characters cost ' + money(sale.rate_per_1m_chars) + ' per million.');
+    : (sale.rate_per_1m_chars != null
+      ? 'Characters cost ' + money(sale.rate_per_1m_chars) + ' per million.'
+      : (priced
+        ? 'Characters are sold in the packages below.'
+        : 'This voice server is not selling characters right now.'));
   drawCreditsBuy(d);
   drawChip(d);
 }

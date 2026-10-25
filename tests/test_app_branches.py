@@ -470,6 +470,24 @@ class TestCreditsAndBilling(Base):
         self.assertEqual(s, 200)
         self.assertIn("balance", out)
 
+    def test_credits_says_nothing_is_for_sale_when_the_server_cannot_charge(self):
+        # The route used to hand back a sale dict with nulls for any speech
+        # connection. "muted" has no pricing at all, so there is no offer.
+        cid = connections.upsert(self.conn, "u1", "muted", "m", {"api_key": "k"})
+        self.app.sale_connection = {"connection_id": cid}
+        s, out = self.app.credits({}, {"user": "u1"})
+        self.assertEqual(s, 200)
+        self.assertIsNone(out["sale"])
+
+    def test_credits_reports_the_rate_its_server_actually_charges(self):
+        cid = connections.upsert(self.conn, "u1", "sale", "c", {"api_key": "k"})
+        self.app.sale_connection = {"connection_id": cid}
+        s, out = self.app.credits({}, {"user": "u1"})
+        self.assertEqual(s, 200, out)
+        self.assertEqual(out["sale"]["provider"], "sale")
+        self.assertAlmostEqual(out["sale"]["rate_per_1m_chars"], 15.0)
+        self.assertEqual(out["sale"]["bundles"], [{"usd": 5, "chars": 333333}])
+
     def test_credits_purchase_refusals(self):
         self.assertEqual(self.app.credits_purchase({}, {})[0], 401)
         self.assertEqual(self.app.credits_purchase({}, {"user": "u1"})[0], 400)
