@@ -52,6 +52,27 @@ class LocalAccounts(unittest.TestCase):
         uid = auth.local_register(self.conn, "chris", "hunter2hunter2")
         self.assertEqual(uid, "local:chris")
 
+    def test_a_hosted_server_can_refuse_an_account_with_no_email(self):
+        # A social login can only find an account by its address. An account
+        # with none is invisible to that door, so the same person signing in
+        # with Google lands on a SECOND account and nothing errors (#159).
+        with self.assertRaises(auth.AuthError) as ctx:
+            auth.local_register(self.conn, "chris", "hunter2hunter2",
+                                require_email=True)
+        self.assertIn("email", str(ctx.exception))
+        self.assertIsNone(self.conn.execute(
+            "SELECT 1 FROM local_accounts WHERE username=?", ("chris",)).fetchone())
+
+    def test_require_email_still_accepts_a_good_address(self):
+        uid = auth.local_register(self.conn, "chris", "hunter2hunter2",
+                                  email="chris@example.com", require_email=True)
+        self.assertEqual(uid, "local:chris")
+
+    def test_require_email_does_not_relax_the_shape_check(self):
+        with self.assertRaises(auth.AuthError):
+            auth.local_register(self.conn, "chris", "hunter2hunter2",
+                                email="not-an-email", require_email=True)
+
     def test_account_for_email_finds_local(self):
         auth.local_register(self.conn, "chris", "hunter2hunter2", email="chris@example.com")
         self.assertEqual(auth.account_for_email(self.conn, "CHRIS@example.com"),

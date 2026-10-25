@@ -2128,7 +2128,8 @@ def make_handler(app):
                     if path.endswith("register"):
                         uid = auth.local_register(app.conn, body.get("username", ""),
                                                   body.get("password", ""),
-                                                  body.get("email", ""))
+                                                  body.get("email", ""),
+                                                  require_email=app.hosted)
                     else:
                         uid = auth.local_login(app.conn, body.get("username", ""),
                                                body.get("password", ""))
