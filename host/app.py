@@ -109,10 +109,23 @@ class App:
     # ---- registry -------------------------------------------------------------
 
     def health(self, q, body):
+        """What this deployment actually loaded, not what we meant to deploy.
+
+        A green build and a successful deploy can both be true while the live
+        box runs with a switch off: #161 was merged and shipped, and hosted was
+        still false because the container set an env var the host never read.
+        So the deploy carries its own name (FIRESIDE_BUILD) and the flags that
+        change behaviour are reported here, where a deploy check can compare
+        them against the config it just sent.
+        """
         h = self.host.health()
         h["hosted"] = self.hosted
+        h["require_auth"] = bool(self.require_auth)
         h["storage_backend"] = self.storage_id
         h["db_backend"] = db.backend_name()
+        h["payments_configured"] = payments.configured()
+        h["sale_connection"] = bool(self.sale_connection)
+        h["build"] = os.environ.get("FIRESIDE_BUILD", "").strip()
         return 200, h
 
     def _fields(self, o):
