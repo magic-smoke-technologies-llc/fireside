@@ -37,7 +37,7 @@ _USER_TABLES = (
     "jobs", "ledger", "balances", "reservations", "positions", "devices",
     "listens", "credentials", "sessions", "local_accounts", "identities",
     "password_resets", "login_claims", "app_handoffs", "user_prefs", "subscriptions", "addons",
-    "user_grants", "connection_overrides",
+    "user_grants", "connection_overrides", "idempotency", "payment_events",
 )
 
 
