@@ -46,6 +46,48 @@ ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 HOST_VERSION = "2.0"
 
 
+def _sale_offer(provider, speech, cred):
+    """What this voice server can actually sell, or None if it can sell nothing.
+
+    A sale connection existing is not the same as something being for sale. The
+    first shape of this emitted a sale dict for any speech connection and left
+    rate_per_1m_chars as a null for the client to interpret, so one capability
+    was described by two fields that could disagree (Leo, 2026-10-25). The test
+    here is the same question the purchase route will ask: can this plugin turn
+    a dollar into characters? No characters, no sale.
+    """
+    def _ask(name, *args):
+        fn = getattr(speech, name, None)
+        return fn(*args) if callable(fn) else None
+
+    rate = _ask("sale_rate_per_1m", cred)
+    try:
+        rate = float(rate) if rate is not None else None
+    except (TypeError, ValueError):
+        rate = None
+    if rate is not None and not rate > 0:
+        rate = None
+
+    bundles = []
+    for b in _ask("bundles", cred) or []:
+        try:
+            if b.get("usd") is not None:
+                bundles.append(b)
+        except AttributeError:
+            continue
+
+    try:
+        buys = int(_ask("chars_for_payment", 1.0, cred) or 0)
+    except (TypeError, ValueError):
+        buys = 0
+    if buys <= 0:
+        return None            # nothing it can charge for, whatever it claims
+    if rate is None and not bundles:
+        return None            # chargeable, but no price it can show
+    return {"provider": provider, "rate_per_1m_chars": rate,
+            "currency": "USD", "bundles": bundles}
+
+
 def _sale_connection_from_env():
     """The one connection that sells character capacity, from the environment.
 
@@ -1018,14 +1060,7 @@ class App:
         }
         provider, speech, cred = self._sale_connection(uid)
         if speech is not None:
-            rate_fn = getattr(speech, "sale_rate_per_1m", None)
-            bundles_fn = getattr(speech, "bundles", None)
-            out["sale"] = {
-                "provider": provider,
-                "rate_per_1m_chars": rate_fn(cred) if callable(rate_fn) else None,
-                "currency": "USD",
-                "bundles": bundles_fn(cred) if callable(bundles_fn) else [],
-            }
+            out["sale"] = _sale_offer(provider, speech, cred)
         return 200, out
 
     def credits_purchase(self, q, body):
