@@ -37,7 +37,9 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from host.host import Host
-from host import accounting, auth, billing, connections, contracts, credentials, db, draft as drafts, erase, example, grants, jobs, library, mailer, payments, playback, plans, pron, quota, reading, stats
+import inspect
+
+from host import accounting, auth, billing, connections, contracts, credentials, db, draft as drafts, erase, example, grants, jobs, library, mailer, payments, playback, plans, pron, quota, ratelimit, reading, stats
 from host.egress import fetch as _fetch
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -135,6 +137,14 @@ class App:
         self.sale_connection = (sale_connection if sale_connection is not None
                                 else _sale_connection_from_env())
         self.rate_limiter = rate_limiter
+        # Two more limiters, for the doors that spend money or send mail. A
+        # purchase starts a Stripe session (and a retry loop can start hundreds),
+        # and register/forgot are the two unauthenticated doors that write a row
+        # or send a message - the classic way a small host is turned into someone
+        # else's tool. Separate from rate_limiter so a metered render does not
+        # eat a buyer's checkout budget.
+        self.buy_limiter = ratelimit.RateLimiter(rate_per_min=10, burst=6)
+        self.door_limiter = ratelimit.RateLimiter(rate_per_min=12, burst=8)
         self.hosted = hosted
         self.require_auth = require_auth
         self.auth = auth.Auth(self.conn)
@@ -143,6 +153,80 @@ class App:
         """The signed-in user wins over any user id the client passed in."""
         return ((q or {}).get("_user") or (body or {}).get("user")
                 or (q or {}).get("user") or "")
+
+    def _limit(self, limiter, key):
+        """False when this caller has used up its allowance."""
+        return limiter is None or not key or limiter.allow(key)
+
+    def _safe_return(self, caller, base):
+        """A return URL we are willing to send a paying browser back to.
+
+        The caller used to supply it outright, which let anyone hand us a URL and
+        have Stripe bounce a real, paid session id to their own site. Only our
+        own origin is accepted now; anything else gets the canonical page.
+        """
+        base = (base or os.environ.get("FIRESIDE_BASE_URL") or "").rstrip("/")
+        caller = (caller or "").strip()
+        if base and (caller == base or caller.startswith(base + "/")):
+            return caller
+        return base
+
+    def _idem_get(self, uid, key):
+        """(status, payload) this user already got for this key, or None."""
+        key = (key or "").strip()[:191]
+        if not uid or not key:
+            return None
+        r = self.conn.execute("SELECT status, response FROM idempotency "
+                              "WHERE user_id=? AND kkey=?", (uid, key)).fetchone()
+        if not r:
+            return None
+        try:
+            return int(r["status"]), json.loads(r["response"] or "{}")
+        except (TypeError, ValueError):
+            return None
+
+    def _idem_put(self, uid, key, status, payload):
+        """Remember a first answer so a retried request gets the same one."""
+        key = (key or "").strip()[:191]
+        if not uid or not key or not isinstance(payload, dict):
+            return
+        if status >= 500 or payload.get("_html"):
+            return
+        try:
+            self.conn.execute(
+                "INSERT INTO idempotency (user_id, kkey, status, response, created_at) "
+                "VALUES (?,?,?,?,?) ON CONFLICT(user_id, kkey) DO UPDATE SET "
+                "status=excluded.status, response=excluded.response",
+                (uid, key, int(status), json.dumps(payload), db.now()))
+            self.conn.commit()
+        except Exception:
+            # A cache is never allowed to fail the request it is caching.
+            pass
+
+    def _claim_payment(self, event_id, kind, uid, reference, chars=0, detail=""):
+        """True the first time this provider event is applied, False after.
+
+        One row per provider object, so a webhook retry and the browser's own
+        confirm can both land and the characters are credited once. Portable
+        across the two engines: a select then an insert, no upsert clause.
+        """
+        event_id = (event_id or "").strip()
+        if not event_id:
+            return False
+        for _ in range(2):
+            if self.conn.execute("SELECT 1 FROM payment_events WHERE id=?",
+                                 (event_id,)).fetchone():
+                return False
+            try:
+                self.conn.execute(
+                    "INSERT INTO payment_events (id, kind, user_id, reference, "
+                    "chars, detail, created_at) VALUES (?,?,?,?,?,?,?)",
+                    (event_id, kind, uid, reference, int(chars or 0),
+                     detail or "", db.now()))
+                return True
+            except Exception:
+                continue
+        return False
 
     @property
     def storage(self):
@@ -1065,11 +1149,23 @@ class App:
 
     def credits_purchase(self, q, body):
         """Buy character capacity. Held until a payment provider is configured.
+
         The plugin sets how many characters a dollar amount buys (rounded down),
-        and the host credits exactly that many, never more."""
+        and that number is pinned in the checkout metadata at the moment the
+        buyer is quoted it - the server never re-derives the count later from a
+        rate that may have moved. Card entry happens on the provider's hosted
+        page; the host sees only a session id, and credits once that session
+        reads back paid.
+        """
         uid = self._uid(q, body)
         if not uid:
             return 401, {"error": "auth required"}
+        if not self._limit(self.buy_limiter, uid):
+            return 429, {"error": "rate limited"}
+        idem = (q or {}).get("_idem", "")
+        hit = self._idem_get(uid, idem)
+        if hit:
+            return hit
         provider, speech, cred = self._sale_connection(uid)
         if speech is None:
             return 400, {"error": "no sale connection configured"}
@@ -1087,14 +1183,71 @@ class App:
         chars = int(to_chars(usd, cred)) if callable(to_chars) else 0
         if chars <= 0:
             return 400, {"error": "amount too small to buy characters"}
-        receipt = pp.charge(usd, {"user": uid, "provider": provider, "chars": chars})
+        hosted = getattr(pp, "purchase_checkout", None)
+        if callable(hosted):
+            co = _with_idem(hosted, usd,
+                            {"user": uid, "provider": provider, "chars": chars,
+                             "return_url": self._safe_return(
+                                 (body or {}).get("return_url"),
+                                 (q or {}).get("_base", ""))}, idem=idem)
+            if not getattr(co, "ok", False):
+                return 402, {"error": "checkout refused",
+                             "detail": getattr(co, "detail", "")}
+            payload = {"ok": True, "status": "awaiting_payment", "chars": chars,
+                       "usd": round(usd, 2), "url": co.url,
+                       "reference": co.reference,
+                       "balance": accounting.balance(self.conn, uid)}
+            self._idem_put(uid, idem, 200, payload)
+            return 200, payload
+        # A provider with no hosted checkout still has charge(): one call, and
+        # the money either settled or it did not. Nothing is credited otherwise.
+        receipt = _with_idem(pp.charge, usd,
+                             {"user": uid, "provider": provider, "chars": chars},
+                             idem=idem)
         if not receipt.ok:
             return 402, {"error": "payment refused", "detail": receipt.detail}
+        if not self._claim_payment(receipt.reference, "characters", uid,
+                                   receipt.reference, chars, "direct charge"):
+            return 409, {"error": "this payment was already credited",
+                         "reference": receipt.reference,
+                         "balance": accounting.balance(self.conn, uid)}
         total = accounting.topup(self.conn, uid, chars, currency="chars",
                                  note="purchase %.2f USD -> %d chars (%s)"
                                       % (usd, chars, receipt.reference))
-        return 200, {"ok": True, "chars": chars, "balance": total,
-                     "reference": receipt.reference}
+        payload = {"ok": True, "chars": chars, "balance": total,
+                   "reference": receipt.reference}
+        self._idem_put(uid, idem, 200, payload)
+        return 200, payload
+
+    def credits_confirm(self, q, body):
+        """The browser came back from a character purchase: read it back.
+
+        Same honesty rule as the tier: ok only when the provider says the money
+        settled. The session must belong to the caller, and a session that has
+        already been credited credits nothing more - so the 200 this returns is
+        the same one on a reload.
+        """
+        uid = self._uid(q, body)
+        if not uid:
+            return 401, {"error": "auth required"}
+        pp = payments.get()
+        fn = getattr(pp, "purchase_confirm", None) if pp is not None else None
+        if not callable(fn):
+            return 503, {"error": "payments not configured"}
+        ref = (body or {}).get("reference") or q.get("reference") or ""
+        p = fn(ref)
+        if not getattr(p, "ok", False):
+            return 402, {"error": "not confirmed", "detail": getattr(p, "detail", "")}
+        if getattr(p, "user", "") != uid:
+            return 403, {"error": "that purchase belongs to another account"}
+        fresh = self._claim_payment(p.reference, "characters", uid, p.reference,
+                                    p.chars, "checkout confirmed")
+        if fresh and p.chars:
+            accounting.topup(self.conn, uid, p.chars, currency="chars",
+                             note="purchase %d chars (%s)" % (p.chars, p.reference))
+        return 200, {"ok": True, "chars": p.chars, "credited": fresh,
+                     "balance": accounting.balance(self.conn, uid),
+                     "reference": p.reference}
 
     # ---- billing (the recurring platform tier) -------------------------------
     # The provider is the authority on plans and on whether a checkout is paid.
@@ -1148,11 +1301,18 @@ class App:
         if not callable(fn):
             return 503, {"error": "payments not configured",
                          "detail": "the platform tier is held until a payments provider lands"}
+        if not self._limit(self.buy_limiter, uid):
+            return 429, {"error": "rate limited"}
+        idem = (q or {}).get("_idem", "")
+        hit = self._idem_get(uid, idem)
+        if hit:
+            return hit
         body = body or {}
         plan = body.get("plan") or q.get("plan") or ""
         items = body.get("items")
         meta = {"user": uid,
-                "return_url": body.get("return_url") or ""}
+                "return_url": self._safe_return(body.get("return_url"),
+                                                (q or {}).get("_base", ""))}
         if isinstance(items, list) and items:
             clean = []
             for it in items:
@@ -1175,11 +1335,13 @@ class App:
             except (TypeError, ValueError):
                 quantity = 1
             meta["quantity"] = max(1, quantity)
-        co = fn(plan, meta)
+        co = _with_idem(fn, plan, meta, idem=idem)
         if not getattr(co, "ok", False):
             return 402, {"error": "checkout refused",
                          "detail": getattr(co, "detail", "")}
-        return 200, {"url": co.url, "reference": co.reference}
+        payload = {"url": co.url, "reference": co.reference}
+        self._idem_put(uid, idem, 200, payload)
+        return 200, payload
 
     def _apply_subscription(self, uid, sub, ref, provider_id):
         """Write what the provider reported into the rows the host reads.
@@ -1189,6 +1351,10 @@ class App:
         upserts), so the browser confirm and the webhook landing together - in
         either order - leave the same rows, never a doubled one.
         """
+        ids = {"provider": provider_id, "reference": ref,
+               "current_period_end": sub.current_period_end,
+               "customer": getattr(sub, "customer", "") or "",
+               "subscription_id": getattr(sub, "subscription_id", "") or ""}
         items = getattr(sub, "items", None)
         if items:
             applied = []
@@ -1198,25 +1364,24 @@ class App:
                 if pid == quota.STORAGE_ADDON:
                     row = billing.upsert_addon(
                         self.conn, uid, quota.STORAGE_ADDON, qty, sub.status,
-                        provider=provider_id, reference=ref,
-                        current_period_end=sub.current_period_end)
+                        **ids)
                     applied.append({"addon": row})
                 elif pid:
-                    row = billing.upsert(self.conn, uid, pid, sub.status,
-                                         provider=provider_id, reference=ref,
-                                         current_period_end=sub.current_period_end)
+                    row = billing.upsert(self.conn, uid, pid, sub.status, **ids)
                     applied.append({"subscription": row})
             return {"applied": applied}
         # An add-on does not replace the tier - it adds capacity to it.
         if getattr(sub, "plan", "") == quota.STORAGE_ADDON:
             return {"addon": billing.upsert_addon(
                 self.conn, uid, quota.STORAGE_ADDON,
-                getattr(sub, "quantity", 0) or 1, sub.status,
-                provider=provider_id, reference=ref,
-                current_period_end=sub.current_period_end)}
+                getattr(sub, "quantity", 0) or 1, sub.status, **ids)}
+        if not getattr(sub, "plan", ""):
+            # a paid session that names no tier: a character purchase, or a
+            # shape we do not understand. Either way a blank tier row is not a
+            # subscription, and writing one would grant a free platform plan.
+            return {"ignored": "checkout names no plan"}
         return {"subscription": billing.upsert(
-            self.conn, uid, sub.plan, sub.status, provider=provider_id,
-            reference=ref, current_period_end=sub.current_period_end)}
+            self.conn, uid, sub.plan, sub.status, **ids)}
 
     def billing_confirm(self, q, body):
         uid = self._uid(q, body)
@@ -1231,12 +1396,112 @@ class App:
         if not getattr(sub, "ok", False):
             return 402, {"error": "not confirmed",
                          "detail": getattr(sub, "detail", "")}
+        # A session id is not a capability: without this check, anyone who
+        # learned one could apply someone else's paid plan to their own account.
+        if getattr(sub, "user", "") and sub.user != uid:
+            return 403, {"error": "that checkout belongs to another account"}
         out = self._apply_subscription(uid, sub, ref, getattr(pp, "id", ""))
         resp = {"ok": True}
         resp.update(out)
         if "applied" in out:
             resp["subscription"] = billing.get(self.conn, uid)
         return 200, resp
+
+    def billing_cancel(self, q, body):
+        """Stop the next renewal. Access lasts to the end of the paid period.
+
+        Without this a reader had no way to stop being billed except to ask us,
+        and deleting the account did not cancel anything - the invoices kept
+        coming to a customer who no longer existed. The provider is the authority:
+        we ask it to stop, then record what it says.
+        """
+        uid = self._uid(q, body)
+        if not uid:
+            return 401, {"error": "auth required"}
+        if not self._limit(self.buy_limiter, uid):
+            return 429, {"error": "rate limited"}
+        pp = payments.get()
+        fn = getattr(pp, "cancel", None) if pp is not None else None
+        if not callable(fn):
+            return 503, {"error": "payments not configured"}
+        sub = billing.get(self.conn, uid)
+        sid = (sub or {}).get("subscription_id") or ""
+        if not sid:
+            return 409, {"error": "no subscription to cancel",
+                         "detail": "this account has no recurring charge on file"}
+        res = fn(sid)
+        if not res.get("ok"):
+            return 402, {"error": "cancel refused", "detail": res.get("detail", "")}
+        if sub:
+            billing.upsert(self.conn, uid, sub["plan"], sub["status"],
+                           provider=sub["provider"], reference=sub["reference"],
+                           current_period_end=res.get("current_period_end")
+                           or sub["current_period_end"],
+                           customer=sub.get("customer", ""),
+                           subscription_id=sid)
+        return 200, {"ok": True, "cancel_at_period_end":
+                     bool(res.get("cancel_at_period_end")),
+                     "current_period_end": res.get("current_period_end", 0),
+                     "subscription": billing.get(self.conn, uid)}
+
+    def billing_portal(self, q, body):
+        """A provider-hosted page to change the card or the plan.
+
+        Card details never reach this server, and a plan change is priced by the
+        provider from its own catalog. Needs the customer id, which is why the
+        checkout now stores it.
+        """
+        uid = self._uid(q, body)
+        if not uid:
+            return 401, {"error": "auth required"}
+        if not self._limit(self.buy_limiter, uid):
+            return 429, {"error": "rate limited"}
+        pp = payments.get()
+        fn = getattr(pp, "portal", None) if pp is not None else None
+        if not callable(fn):
+            return 503, {"error": "payments not configured"}
+        sub = billing.get(self.conn, uid)
+        customer = (sub or {}).get("customer") or ""
+        if not customer:
+            return 409, {"error": "no billing customer on file"}
+        res = fn(customer, self._safe_return((body or {}).get("return_url"),
+                                             (q or {}).get("_base", "")))
+        if not res.get("ok"):
+            return 402, {"error": "portal refused", "detail": res.get("detail", "")}
+        return 200, {"ok": True, "url": res.get("url", "")}
+
+    def _apply_subscription_state(self, st, provider_id):
+        """Apply a lifecycle event to the row that names that subscription.
+
+        Matched by the provider's subscription id, never by user: a renewal body
+        carries no user id, and guessing one from a customer id would be worse
+        than doing nothing. An event for a subscription we never stored is
+        acknowledged and ignored.
+        """
+        sid = (st or {}).get("subscription_id", "")
+        uid = billing.by_subscription(self.conn, sid)
+        if not uid:
+            return 200, {"ok": True, "applied": False,
+                         "detail": "unknown subscription", "ignored": st.get("event", "")}
+        status = st.get("status") or ""
+        end = int(st.get("current_period_end") or 0)
+        row = billing.get(self.conn, uid)
+        if row and row.get("subscription_id") == sid:
+            billing.upsert(self.conn, uid, row["plan"], status or row["status"],
+                           provider=provider_id, reference=row["reference"],
+                           current_period_end=end or row["current_period_end"],
+                           customer=st.get("customer", ""), subscription_id=sid)
+        addon = billing.addons(self.conn, uid).get(billing.STORAGE_ADDON)
+        if addon and addon.get("subscription_id") == sid:
+            billing.upsert_addon(self.conn, uid, billing.STORAGE_ADDON,
+                                 addon["quantity"], status or addon["status"],
+                                 provider=provider_id,
+                                 reference=addon["reference"],
+                                 current_period_end=end or addon["current_period_end"],
+                                 customer=st.get("customer", ""),
+                                 subscription_id=sid)
+        return 200, {"ok": True, "applied": True, "user": uid,
+                     "status": status, "event": st.get("event", "")}
 
     def payment_webhook(self, raw, sig_header, provider_id="stripe"):
         """Stripe's server-to-server view of a settled checkout.
@@ -1262,7 +1527,33 @@ class App:
         if callable(rfn):
             ref = rfn(event) or ""
         typ = (event or {}).get("type", "")
+        obj = ((event or {}).get("data") or {}).get("object") or {}
+        # A character purchase settles into a payment-mode session. Credit it
+        # here so a buyer who closes the tab is not charged for nothing.
+        if ref and (obj.get("metadata") or {}).get("kind") == "characters":
+            pfn = getattr(pp, "purchase_confirm", None)
+            if not callable(pfn):
+                return 200, {"ok": True, "reference": ref, "applied": False,
+                             "detail": "provider cannot confirm purchases"}
+            p = pfn(ref)
+            if not getattr(p, "ok", False):
+                return 200, {"ok": True, "reference": ref, "applied": False,
+                             "detail": getattr(p, "detail", "")}
+            fresh = self._claim_payment(p.reference, "characters", p.user,
+                                        p.reference, p.chars, "webhook")
+            if fresh and p.chars and p.user:
+                accounting.topup(self.conn, p.user, p.chars, currency="chars",
+                                 note="purchase %d chars (%s)" % (p.chars, p.reference))
+            return 200, {"ok": True, "reference": ref, "applied": fresh,
+                         "user": p.user, "chars": p.chars}
         if not ref:
+            # Renewals, failed cards, cancellations: no checkout session, but a
+            # subscription id, which is the row we must update or the paid tier
+            # never lapses.
+            sfn = getattr(pp, "subscription_state", None)
+            st = sfn(event) if callable(sfn) else None
+            if st:
+                return self._apply_subscription_state(st, getattr(pp, "id", ""))
             return 200, {"ok": True, "ignored": typ}
         sub = pp.confirm(ref)
         if not getattr(sub, "ok", False):
@@ -1863,6 +2154,28 @@ class App:
         return 200, {"ok": True, "username": name, "has_password": True,
                      "ended": ended}
 
+    def _cancel_billing_for(self, uid):
+        """Stop the recurring charge before the account is erased.
+
+        Deleting the rows on our side never reached the provider, so a deleted
+        account kept being invoiced. Asking first is the whole fix; a failure is
+        reported rather than hidden, because an invoice arriving for a customer
+        who no longer exists is exactly the kind of thing the buyer must not
+        have to discover alone.
+        """
+        sub = billing.get(self.conn, uid) or {}
+        sid = sub.get("subscription_id") or ""
+        if not sid:
+            return {"cancelled": False, "detail": "no subscription on file"}
+        pp = payments.get(sub.get("provider") or None)
+        fn = getattr(pp, "cancel", None) if pp is not None else None
+        if not callable(fn):
+            return {"cancelled": False, "detail": "payments not configured"}
+        res = fn(sid)
+        return {"cancelled": bool(res.get("ok")),
+                "subscription_id": sid,
+                "detail": res.get("detail", "")}
+
     def account_delete(self, q, body):
         """Erase the signed-in account for good: books, voiced audio, history,
         credentials, and sign-ins.
@@ -1886,7 +2199,16 @@ class App:
         elif (body.get("confirm") or "").strip().lower() != "delete my account":
             return 400, {"error": "confirm",
                          "detail": "type 'delete my account' to confirm"}
+        billing_out = self._cancel_billing_for(uid)
         out = erase.purge_user(self.conn, self.storage, uid)
+        if billing_out.get("subscription_id") and not billing_out["cancelled"]:
+            # keep a trail an operator can finish by hand, since the rows that
+            # named the subscription are gone with the account
+            self._claim_payment("cancel-failed:%s:%s" % (uid, db.now()),
+                                "cancel_failed", uid,
+                                billing_out.get("subscription_id", ""), 0,
+                                billing_out.get("detail", ""))
+        out["billing"] = billing_out
         out["ok"] = True
         out["logout"] = True
         return 200, out
@@ -1938,6 +2260,8 @@ POST_ROUTES = {
     "/grants": "grants_set",
     "/admin/plan": "plans_admin_set",
     "/billing/checkout": "billing_checkout", "/billing/confirm": "billing_confirm",
+    "/billing/cancel": "billing_cancel", "/billing/portal": "billing_portal",
+    "/credits/confirm": "credits_confirm",
     "/sessions/revoke": "session_revoke",
     "/sessions/revoke_all": "sessions_revoke_all",
 }
@@ -1958,6 +2282,23 @@ AUTH_ROUTES = {"/auth/logout", "/auth/claim", "/auth/claim/confirm",
                "/auth/forgot", "/auth/reset"}
 
 
+def _with_idem(fn, *args, **kwargs):
+    """Call a provider method, passing `idem` only if it takes one.
+
+    Third-party providers (and the fakes the tests drive the host with) predate
+    idempotency, so a missing keyword is not an error - it just means that
+    provider cannot dedupe at its end and the host's own ledger has to.
+    """
+    idem = kwargs.pop("idem", "")
+    if idem:
+        try:
+            if "idem" in inspect.signature(fn).parameters:
+                kwargs["idem"] = idem
+        except (TypeError, ValueError):
+            pass
+    return fn(*args, **kwargs)
+
+
 def _truthy(v):
     return str(v or "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -1976,10 +2317,20 @@ def make_handler(app):
             return ""
 
         def _base_url(self):
+            """Where this box is reachable from the caller's side.
+
+            Behind the Azure ingress the connection is http and the browser is
+            not, so the scheme has to come from the proxy header - otherwise
+            every link we mint (a password reset, a Stripe return) sends the
+            browser to http:// and the page has to redirect to get back to https.
+            """
             env = os.environ.get("FIRESIDE_BASE_URL")
             if env:
                 return env.rstrip("/")
-            return "http://" + (self.headers.get("Host") or "127.0.0.1:8788")
+            proto = (self.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip()
+            if proto not in ("http", "https"):
+                proto = "http"
+            return proto + "://" + (self.headers.get("Host") or "127.0.0.1:8788")
 
         def _cookie_str(self, name, value, path="/", max_age=None):
             c = "%s=%s; Path=%s; HttpOnly; SameSite=Lax" % (name, value, path)
@@ -2167,6 +2518,11 @@ def make_handler(app):
                     auth.SESSION_COOKIE, "", max_age=0)])
             if path in ("/auth/local/register", "/auth/local/login") \
                     and self.command == "POST":
+                # Unauthenticated and writes a row, so it is the first door a
+                # script would knock on. Keyed by address, not by the username
+                # it claims, so changing the name buys nothing.
+                if not app.door_limiter.allow("auth:" + (self._ip() or "?")):
+                    return self._json(429, {"error": "too many attempts"})
                 n = int(self.headers.get("Content-Length") or 0)
                 try:
                     body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
@@ -2230,6 +2586,10 @@ def make_handler(app):
             # answer is the same whether or not an account matched - telling the
             # two apart would turn this door into "who has an account here?".
             if path == "/auth/forgot" and self.command == "POST":
+                # Sends mail: unmetered, it is a free way to make us a spam relay
+                # and to enumerate who has an account here.
+                if not app.door_limiter.allow("forgot:" + (self._ip() or "?")):
+                    return self._json(429, {"error": "too many attempts"})
                 from urllib.parse import quote
                 n = int(self.headers.get("Content-Length") or 0)
                 try:
@@ -2305,6 +2665,13 @@ def make_handler(app):
                 return self._json(503, {"error": "session lookup failed: %s: %s"
                                                  % (type(e).__name__, e)})
             q["_token"] = self._token()
+            # three things a handler needs that only the request knows: where
+            # this box is reachable (for a return URL we control), who is
+            # calling (for the unauthenticated doors), and the caller's
+            # idempotency key (so a retried purchase is the same purchase).
+            q["_base"] = self._base_url()
+            q["_ip"] = self._ip()
+            q["_idem"] = (self.headers.get("Idempotency-Key") or "").strip()[:191]
             if app.require_auth and path not in PUBLIC_ROUTES and not q["_user"]:
                 return self._json(401, {"error": "auth required"})
             try:

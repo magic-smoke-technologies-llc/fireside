@@ -882,6 +882,14 @@ function failure(msg, status, data) {
   const e = new Error(msg); e.status = status; e.data = data || {}; return e;
 }
 const jpost = (p, o) => api(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) });
+// A purchase carries an Idempotency-Key so a double-tap, a retry, or a flaky
+// connection produces one Stripe session instead of two charges. The key is
+// random per attempt, not per click: a deliberate second purchase is a new key.
+const newIdem = () => 'idem-' + Date.now().toString(36) + '-' +
+  Math.random().toString(36).slice(2, 10);
+const jpostIdem = (p, o) => api(p, { method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'Idempotency-Key': newIdem() },
+  body: JSON.stringify(o) });
 
 // A refusal that carries numbers is a different sentence from one that does not.
 // "insufficient balance" leaves a reader stuck; "needs 41,200, you have 12,400"
@@ -1656,9 +1664,15 @@ function drawCreditsBuy(d) {
   const can = !!d.payments_configured;
   const msg = t => { const m = $('#creditsmsg'); if (m) m.textContent = t; };
   const buy = usd => async () => {
-    msg('Charging\u2026');
+    msg('Opening the payment page\u2026');
     try {
-      const r = await jpost('/credits/purchase', { usd: Number(usd) });
+      const r = await jpostIdem('/credits/purchase', {
+        usd: Number(usd),
+        return_url: location.origin + location.pathname,
+      });
+      // The card is entered on the provider's page, never here. Coming back
+      // with ?checkout= is what confirms it (see confirmCheckout).
+      if (r.url) { location.href = r.url; return; }
       msg('+' + nchar(r.chars) + ' characters. Reference ' + r.reference + '.');
       await loadCredits();
     } catch (e) {
@@ -1741,6 +1755,40 @@ async function loadPlan() {
       cards.append(card);
     });
   }
+  // A paying reader could not stop the next charge anywhere in the app, and a
+  // failed card could not be replaced without asking us. Both now go through
+  // the provider, so no card detail passes through this server.
+  if (cards && bill && bill.subscription && bill.subscription.subscription_id) {
+    const sub = bill.subscription;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap';
+    const note = document.createElement('span'); note.className = 'small';
+    note.textContent = 'Renews through ' + (sub.provider || 'the payment provider') + '.';
+    row.append(note);
+    const manage = document.createElement('button');
+    manage.className = 'btn'; manage.type = 'button'; manage.textContent = 'Change card';
+    manage.onclick = async () => {
+      try {
+        const d = await jpost('/billing/portal',
+          { return_url: location.origin + location.pathname });
+        if (d.url) { location.href = d.url; return; }
+        $('#planmsg').textContent = d.detail || 'the provider did not return a page';
+      } catch (e) { $('#planmsg').textContent = errorText(e); }
+    };
+    const cancel = document.createElement('button');
+    cancel.className = 'btn'; cancel.type = 'button'; cancel.textContent = 'Cancel renewal';
+    cancel.onclick = async () => {
+      if (!window.confirm('Stop the next charge? You keep what you already paid '
+        + 'for until the period ends.')) return;
+      try {
+        await jpost('/billing/cancel', {});
+        idle('Renewal cancelled. You keep access until the period ends.');
+        loadPlan();
+      } catch (e) { $('#planmsg').textContent = errorText(e); }
+    };
+    row.append(manage, cancel);
+    cards.append(row);
+  }
   const blocks = $('#planblocks');
   if (blocks) {
     blocks.innerHTML = '';
@@ -1766,11 +1814,15 @@ async function startCheckout(body, msgEl) {
   const msg = msgEl || $('#planmsg');
   try {
     body.return_url = location.origin + location.pathname;
-    const d = await jpost('/billing/checkout', body);
+    const d = await jpostIdem('/billing/checkout', body);
     if (d.url) { location.href = d.url; return; }
     msg.textContent = d.detail || 'checkout did not return a page';
   } catch (e) { msg.textContent = e.message || 'could not start checkout'; }
 }
+// A returning browser carries one checkout id and it can name two things: a
+// subscription and its storage blocks, or a bundle of characters. Ask for the
+// tier first; if the session was a one-shot purchase, ask for the characters.
+// Both routes are idempotent, so a page reload credits nothing twice.
 async function confirmCheckout(ref) {
   try {
     const d = await jpost('/billing/confirm', { reference: ref });
@@ -1778,7 +1830,16 @@ async function confirmCheckout(ref) {
     else if (d.addon) idle('Storage updated. You now have ' + d.addon.quantity + ' block(s).');
     else if (d.applied) idle('Purchase complete.');
     if (d.ok) clearCart();
-  } catch (e) { fail(e); }
+    return;
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) { fail(e); return; }
+    try {
+      const c = await jpost('/credits/confirm', { reference: ref });
+      idle('+' + nchar(c.chars) + ' characters added to your balance.');
+      await loadCredits();
+      return;
+    } catch (_) { fail(e); }
+  }
 }
 // --- plans page: the offering, rendered for the buy page --------------------
 // Same catalog the settings tab reads, laid out as a sales page: what each tier
