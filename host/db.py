@@ -135,6 +135,13 @@ CREATE TABLE IF NOT EXISTS addons (
     status VARCHAR(32), provider VARCHAR(32), reference VARCHAR(191),
     current_period_end BIGINT DEFAULT 0, updated_at VARCHAR(32), created_at VARCHAR(32),
     PRIMARY KEY (user_id, addon));
+CREATE TABLE IF NOT EXISTS payment_events (
+    id VARCHAR(191) PRIMARY KEY, kind VARCHAR(32), user_id VARCHAR(128),
+    reference VARCHAR(191), chars INT DEFAULT 0, detail TEXT,
+    created_at VARCHAR(32));
+CREATE TABLE IF NOT EXISTS idempotency (
+    user_id VARCHAR(128), kkey VARCHAR(191), status INT DEFAULT 0,
+    response TEXT, created_at VARCHAR(32), PRIMARY KEY (user_id, kkey));
 CREATE TABLE IF NOT EXISTS user_grants (
     user_id VARCHAR(128) PRIMARY KEY,
     storage_unlimited INT DEFAULT 0, credits_unlimited INT DEFAULT 0,
@@ -272,6 +279,12 @@ _ADDED_COLUMNS = [
     # the address a password account registered with. Optional on old rows;
     # the social door reads it to spot an account that already exists.
     ("local_accounts", "email", "VARCHAR(255) DEFAULT ''"),
+    # the Stripe objects behind a recurring row. The subscription id is what a
+    # cancel or a lifecycle event names; without it the host can only guess.
+    ("subscriptions", "customer", "VARCHAR(64) DEFAULT ''"),
+    ("subscriptions", "subscription_id", "VARCHAR(64) DEFAULT ''"),
+    ("addons", "customer", "VARCHAR(64) DEFAULT ''"),
+    ("addons", "subscription_id", "VARCHAR(64) DEFAULT ''"),
 ]
 
 
