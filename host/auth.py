@@ -191,7 +191,7 @@ def _start_on_free_tier(conn, uid):
         (uid, "free", "active", "", "", 0, _now(), _now()))
 
 
-def local_register(conn, username, password, email=""):
+def local_register(conn, username, password, email="", require_email=False):
     """Create a local account. Raises AuthError if the name is taken or weak.
 
     `email` is optional for callers that predate it, but a server that wants the
@@ -202,6 +202,13 @@ def local_register(conn, username, password, email=""):
 
     The first account on a fresh server is always allowed and becomes admin;
     every later account needs registration to be open.
+
+    `require_email` closes the last way to make an unemailed account. A hosted
+    server sets it: the address is the only key that lets a later social login
+    find this account, and an account without one is invisible to that door -
+    the same person logging in with Google silently gets a SECOND account, and
+    nothing errors. Self-hosted single-user servers may keep it off, which is
+    why the default is off rather than the reverse.
     """
     name = normalize_username(username)
     if len(name) < 3 or len(name) > 64:
@@ -209,6 +216,8 @@ def local_register(conn, username, password, email=""):
     if not re.match(r"^[a-z0-9._-]+$", name):
         raise AuthError("username may use letters, digits, dot, dash, underscore")
     email = (email or "").strip().lower()
+    if require_email and not email:
+        raise AuthError("an email address is required")
     if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         raise AuthError("that email address does not look right")
     if len(email) > 255:
