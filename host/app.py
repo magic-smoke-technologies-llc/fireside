@@ -2304,6 +2304,18 @@ def make_handler(app):
     return Handler
 
 
+def hosted_from(flag=False):
+    """Is this deployment hosted?
+
+    A container says so in its environment, not in its command line, so the
+    flag has to be readable both ways. This matters more than it looks: the
+    only thing `hosted` turns on today is requiring an email at sign-up, and a
+    hosted box that quietly answers False re-opens the hole where a social
+    login mints a second account because the first one had no address.
+    """
+    return bool(flag) or _truthy(os.environ.get("FIRESIDE_HOSTED"))
+
+
 def serve(app=None, port=8788, host="127.0.0.1"):
     payments.load()      # register the payment provider named by FIRESIDE_PAYMENT_PROVIDER
     app = app or App()
@@ -2332,13 +2344,14 @@ if __name__ == "__main__":
         os.environ["FIRESIDE_DATA"] = args.data
     # A session is required unless the operator explicitly opens the server
     # (--open / FIRESIDE_OPEN=1). --require-auth / --hosted still force it on.
-    require = args.require_auth or args.hosted or (not args.open)
+    hosted = hosted_from(args.hosted)
+    require = args.require_auth or hosted or (not args.open)
     if _truthy(os.environ.get("FIRESIDE_REQUIRE_AUTH")):
         require = True
     if _truthy(os.environ.get("FIRESIDE_OPEN")):
         require = False
     app, httpd = serve(App(plugins_root=args.plugins, storage_id=args.storage,
-                           hosted=args.hosted, require_auth=require),
+                           hosted=hosted, require_auth=require),
                        args.port, args.host)
     print("fireside v2 host on http://%s:%d" % (args.host, httpd.server_address[1]))
     try:
