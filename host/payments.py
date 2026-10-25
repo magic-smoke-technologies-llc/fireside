@@ -28,7 +28,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-__all__ = ["Receipt", "Plan", "Checkout", "Subscription",
+__all__ = ["Receipt", "Plan", "Checkout", "Subscription", "Purchase",
            "register", "get", "configured", "load", "REGISTRY"]
 
 
@@ -93,12 +93,41 @@ class Subscription:
     detail: str = ""
     quantity: int = 0
     items: List[Dict[str, Any]] = field(default_factory=list)
+    # the provider's two durable ids. `reference` (the checkout session) is
+    # enough to confirm a sale once; a cancel or a renewal event names the
+    # subscription, and a portal session names the customer. Kept apart so the
+    # host never has to derive one from the other.
+    customer: str = ""
+    subscription_id: str = ""
 
     def dict(self):
         return {"ok": self.ok, "user": self.user, "plan": self.plan,
                 "status": self.status, "current_period_end": self.current_period_end,
                 "reference": self.reference, "detail": self.detail,
-                "quantity": self.quantity, "items": self.items}
+                "quantity": self.quantity, "items": self.items,
+                "customer": self.customer,
+                "subscription_id": self.subscription_id}
+
+
+@dataclass
+class Purchase:
+    """A one-shot purchase of character capacity, read back from the provider.
+
+    `ok` means the money settled. The provider states how many characters the
+    money bought, so the host never has to re-derive a price from a rate that may
+    have moved since the buyer was quoted one.
+    """
+    ok: bool = False
+    user: str = ""
+    chars: int = 0
+    provider: str = ""
+    reference: str = ""
+    detail: str = ""
+
+    def dict(self):
+        return {"ok": self.ok, "user": self.user, "chars": self.chars,
+                "provider": self.provider, "reference": self.reference,
+                "detail": self.detail}
 
 
 # id -> provider object. Empty until an operator registers one.

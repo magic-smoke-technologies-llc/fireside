@@ -30,7 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from host.payments import Checkout, Plan, Receipt, Subscription
+from host.payments import Checkout, Plan, Purchase, Receipt, Subscription
 
 STRIPE_API = os.environ.get("STRIPE_API_BASE", "https://api.stripe.com").rstrip("/")
 
@@ -85,10 +85,12 @@ class _Response:
         return json.loads(self._body or "{}")
 
 
-def _http_post(url, data=None, auth=None, timeout=None):
+def _http_post(url, data=None, auth=None, timeout=None, headers=None):
     body = urllib.parse.urlencode(data or {}, doseq=True).encode()
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
     if auth:
         req.add_header("Authorization", _basic_auth(auth[0]))
     try:
@@ -152,6 +154,20 @@ class StripeProvider:
         return _http_get(self.api_base + path, params=params,
                          auth=self._auth(), timeout=self.timeout)
 
+    def _send(self, path, data, headers=None):
+        """POST, carrying an Idempotency-Key when the caller asked for one.
+
+        The injected transport used by the tests takes only (url, data, auth,
+        timeout), so a header is added only on the real transport; a test that
+        cares about the header patches `_http_post` instead of `post`.
+        """
+        fn = self._post
+        if headers and fn is _http_post:
+            return _http_post(self.api_base + path, data=data, auth=self._auth(),
+                              timeout=self.timeout, headers=headers)
+        return fn(self.api_base + path, data=data, auth=self._auth(),
+                  timeout=self.timeout)
+
     def live(self):
         # A standard secret key is sk_live_/sk_test_; a restricted key is
         # rk_live_/rk_test_. Either is live when the mode segment says live.
@@ -177,7 +193,7 @@ class StripeProvider:
             return os.environ.get("STRIPE_TEST_PAYMENT_METHOD", "pm_card_visa")
         return ""
 
-    def charge(self, usd, meta=None):
+    def charge(self, usd, meta=None, idem=""):
         meta = meta or {}
         try:
             amount = int(round(float(usd) * 100))
@@ -201,8 +217,7 @@ class StripeProvider:
             "metadata[chars]": str(meta.get("chars", "")),
         }
         try:
-            r = self._post(self.api_base + "/v1/payment_intents", data=data,
-                           auth=self._auth(), timeout=self.timeout)
+            r = self._send("/v1/payment_intents", data, _idem(idem))
         except (urllib.error.URLError, OSError) as e:
             return Receipt(False, "", "stripe unreachable: %s" % e)
         try:
@@ -232,7 +247,7 @@ class StripeProvider:
                 return p
         return None
 
-    def checkout(self, plan_id, meta=None):
+    def checkout(self, plan_id, meta=None, idem=""):
         """Create a Stripe-hosted Checkout Session, return its URL.
 
         Two shapes. A single plan: `plan_id` with `meta['quantity']` buying more
@@ -244,7 +259,7 @@ class StripeProvider:
         meta = meta or {}
         items = meta.get("items") or None
         if items:
-            return self._checkout_items(items, meta)
+            return self._checkout_items(items, meta, idem=idem)
         plan = self._plan(plan_id)
         if plan is None:
             return Checkout(False, detail="unknown plan %r" % plan_id)
@@ -268,9 +283,9 @@ class StripeProvider:
         if success_url:
             data["success_url"] = success_url
             data["cancel_url"] = return_url
-        return self._session(data)
+        return self._session(data, idem=idem)
 
-    def _checkout_items(self, items, meta):
+    def _checkout_items(self, items, meta, idem=""):
         """A cart: one line item per entry, all on one subscription session.
 
         Only names this provider actually prices are accepted - an unknown plan
@@ -313,9 +328,9 @@ class StripeProvider:
         if success_url:
             data["success_url"] = success_url
             data["cancel_url"] = return_url
-        return self._session(data)
+        return self._session(data, idem=idem)
 
-    def _session(self, data):
+    def _session(self, data, idem=""):
         # Stripe now turns Managed Payments on by default on some accounts, and a
         # session made while it is on demands a tax_code on every product and hands
         # Stripe the merchant of record (its 3.5% on top of processing, and it owns
@@ -324,8 +339,7 @@ class StripeProvider:
         # per session instead of relying on an account-level default we do not own.
         data.setdefault("managed_payments[enabled]", "false")
         try:
-            r = self._post(self.api_base + "/v1/checkout/sessions", data=data,
-                           auth=self._auth(), timeout=self.timeout)
+            r = self._send("/v1/checkout/sessions", data, _idem(idem))
         except (urllib.error.URLError, OSError) as e:
             return Checkout(False, detail="stripe unreachable: %s" % e)
         try:
@@ -337,6 +351,172 @@ class StripeProvider:
             msg = (j.get("error") or {}).get("message") or ("http %d" % r.status_code)
             return Checkout(False, detail=msg)
         return Checkout(True, j.get("url", ""), j.get("id", ""))
+
+    # -- character capacity, bought through Checkout --------------------------
+    # A browser must never post a card to us, and a PaymentIntent built on the
+    # server needs a payment method it does not have. So characters are bought
+    # exactly like the tier: a hosted Checkout Session in payment mode, priced
+    # by this provider, with the character count in metadata. The webhook (or
+    # the browser's return) reads the session back and credits it once.
+
+    def purchase_checkout(self, usd, meta=None, idem=""):
+        meta = meta or {}
+        try:
+            amount = int(round(float(usd) * 100))
+        except (TypeError, ValueError):
+            return Checkout(False, detail="bad amount")
+        if amount <= 0:
+            return Checkout(False, detail="amount must be greater than zero")
+        chars = int(meta.get("chars") or 0)
+        if chars <= 0:
+            return Checkout(False, detail="no characters priced for this amount")
+        return_url = (meta.get("return_url") or "").strip()
+        data = {
+            "mode": "payment",
+            "metadata[kind]": "characters",
+            "metadata[user]": str(meta.get("user", "")),
+            "metadata[provider]": str(meta.get("provider", "")),
+            "metadata[chars]": str(chars),
+            "metadata[usd]": "%.2f" % float(usd),
+            "line_items[0][quantity]": "1",
+            "line_items[0][price_data][currency]": "usd",
+            "line_items[0][price_data][unit_amount]": str(amount),
+            "line_items[0][price_data][product_data][name]":
+                meta.get("description") or "%d characters" % chars,
+        }
+        if return_url:
+            sep = "&" if "?" in return_url else "?"
+            data["success_url"] = return_url + sep + "checkout={CHECKOUT_SESSION_ID}"
+            data["cancel_url"] = return_url
+        return self._session(data, idem=idem)
+
+    def purchase_confirm(self, reference):
+        """Read a one-shot Checkout Session back and say what it bought."""
+        ref = (reference or "").strip()
+        if not ref:
+            return Purchase(False, detail="no checkout reference")
+        r = self._get("/v1/checkout/sessions/" + ref)
+        try:
+            j = r.json()
+        except ValueError:
+            return Purchase(False, reference=ref,
+                            detail="stripe returned non-JSON (http %d)" % r.status_code)
+        if r.status_code != 200:
+            msg = (j.get("error") or {}).get("message") or ("http %d" % r.status_code)
+            return Purchase(False, reference=ref, detail=msg)
+        md = j.get("metadata") or {}
+        user = md.get("user", "")
+        try:
+            chars = int(md.get("chars") or 0)
+        except (TypeError, ValueError):
+            chars = 0
+        if md.get("kind") != "characters":
+            return Purchase(False, user=user, reference=ref,
+                            detail="not a character purchase")
+        if j.get("status") != "complete":
+            return Purchase(False, user=user, chars=chars, reference=ref,
+                            detail="checkout not complete (status=%s)"
+                                   % j.get("status", ""))
+        if j.get("payment_status") not in ("paid", "no_payment_required"):
+            return Purchase(False, user=user, chars=chars, reference=ref,
+                            detail="not paid (status=%s)" % j.get("payment_status", ""))
+        if chars <= 0:
+            return Purchase(False, user=user, reference=ref, detail="no characters")
+        return Purchase(True, user=user, chars=chars,
+                        provider=md.get("provider", ""), reference=ref,
+                        detail="ok")
+
+    # -- managing a live subscription ----------------------------------------
+
+    def cancel(self, subscription_id, at_period_end=True):
+        """Stop the renewal. `at_period_end` keeps what was already paid for.
+
+        Cancelling immediately would take away days the buyer paid for and, on a
+        failed card, would not recover the money anyway; so the default is the
+        one both honest and useful: no further invoices, access until the period
+        they already bought ends.
+        """
+        sid = (subscription_id or "").strip()
+        if not sid:
+            return {"ok": False, "detail": "no subscription on file"}
+        data = {"cancel_at_period_end": "true" if at_period_end else "false"}
+        r = self._send("/v1/subscriptions/" + urllib.parse.quote(sid), data)
+        try:
+            j = r.json()
+        except ValueError:
+            return {"ok": False, "detail": "stripe returned non-JSON (http %d)"
+                                           % r.status_code}
+        if r.status_code != 200:
+            msg = (j.get("error") or {}).get("message") or ("http %d" % r.status_code)
+            return {"ok": False, "detail": msg}
+        return {"ok": True,
+                "status": j.get("status", ""),
+                "cancel_at_period_end": bool(j.get("cancel_at_period_end")),
+                "current_period_end": int(j.get("current_period_end") or 0)}
+
+    def portal(self, customer, return_url=""):
+        """A Stripe-hosted page where a buyer changes their own card or cancels.
+
+        Card details never touch us, and a plan change is priced by Stripe from
+        the Prices in the catalog. Needs the customer id for the subscription.
+        """
+        cid = (customer or "").strip()
+        if not cid:
+            return {"ok": False, "detail": "no customer on file"}
+        data = {"customer": cid}
+        if return_url:
+            data["return_url"] = return_url
+        r = self._send("/v1/billing_portal/sessions", data)
+        try:
+            j = r.json()
+        except ValueError:
+            return {"ok": False, "detail": "stripe returned non-JSON (http %d)"
+                                           % r.status_code}
+        if r.status_code != 200:
+            msg = (j.get("error") or {}).get("message") or ("http %d" % r.status_code)
+            return {"ok": False, "detail": msg}
+        return {"ok": True, "url": j.get("url", "")}
+
+    # -- lifecycle events -----------------------------------------------------
+    # A subscription does not stay alive by itself. Stripe tells us when it
+    # renews, when a card fails, and when it is cancelled; if we only ever acted
+    # on checkout.session.completed the paid tier would never lapse and a failed
+    # card would buy another month.
+
+    def subscription_state(self, event):
+        """The new state of a subscription, from a lifecycle event, or None.
+
+        `invoice.*` events name a subscription too, and are the earliest signal
+        that a renewal charged nothing. Everything is read from the verified
+        event body only - no lookup, so applying one is cheap and a retry is a
+        no-op.
+        """
+        typ = (event or {}).get("type", "")
+        obj = ((event or {}).get("data") or {}).get("object") or {}
+        sid = ""
+        customer = obj.get("customer", "") or ""
+        status = ""
+        period_end = 0
+        if typ.startswith("customer.subscription."):
+            sid = obj.get("id", "") or ""
+            status = obj.get("status", "") or ""
+            period_end = int(obj.get("current_period_end") or 0)
+            if isinstance(customer, dict):
+                customer = customer.get("id", "") or ""
+        elif typ in ("invoice.paid", "invoice.payment_failed",
+                     "invoice.payment_action_required", "invoice.payment_succeeded"):
+            sub = obj.get("subscription") or ""
+            sid = sub.get("id", "") if isinstance(sub, dict) else str(sub or "")
+            status = {"invoice.payment_failed": "past_due",
+                      "invoice.payment_action_required": "past_due"}.get(typ, "active")
+            period_end = int(obj.get("period_end") or 0)
+            if isinstance(customer, dict):
+                customer = customer.get("id", "") or ""
+        if not sid:
+            return None
+        return {"subscription_id": sid, "customer": customer,
+                "status": status, "current_period_end": period_end, "event": typ}
+
 
     # -- webhooks -------------------------------------------------------------
     # A buyer who closes the tab after paying must still get their plan. The
@@ -405,6 +585,9 @@ class StripeProvider:
         if isinstance(sub, str) or not sub:
             sub = {}
         period_end = int(sub.get("current_period_end") or 0)
+        subscription_id = sub.get("id", "") or ""
+        if isinstance(j.get("subscription"), str):
+            subscription_id = j.get("subscription", "")
         status = sub.get("status") or ("complete" if complete else j.get("status", ""))
         if not complete:
             return Subscription(False, user=user, plan=plan, status=j.get("status", ""),
@@ -414,7 +597,15 @@ class StripeProvider:
                                 reference=ref, detail="not paid")
         return Subscription(True, user=user, plan=plan, status=status or "active",
                             current_period_end=period_end, reference=ref,
-                            detail="ok", quantity=quantity, items=items)
+                            detail="ok", quantity=quantity, items=items,
+                            customer=j.get("customer", "") or "",
+                            subscription_id=subscription_id)
+
+
+def _idem(key):
+    """The header dict for a caller-supplied Idempotency-Key, or None."""
+    key = (key or "").strip()
+    return {"Idempotency-Key": key} if key else None
 
 
 def _line(data, i, plan, quantity):
