@@ -1365,7 +1365,12 @@ async function reencodePronImpact() {
   idle('Re-encoded ' + done + ' chapter' + (done === 1 ? '' : 's')
     + ' from the pronunciation change.'
     + (failed ? '  ' + failed + ' could not be re-encoded - open those books and convert.' : ''));
-  if (book) await openBook(book.id);
+  // Re-read whichever book was actually re-encoded: the one on this page, or
+  // the one in the player when this was done from Settings with no book open.
+  const touched = new Set(im.books.map(b => b.id));
+  const reread = (book && touched.has(book.id)) ? book.id
+    : (!book && player && player.id && touched.has(player.id) ? player.id : '');
+  if (reread) await openBook(reread);
 }
 // --- the account's own password -------------------------------------------
 // One form for both cases. An account that has a password must give it before
@@ -2647,13 +2652,58 @@ function renderResume() {
   box.append(cover, col);
 }
 
+// --- audio that changed under us -------------------------------------------
+// A re-encode (a pronunciation fix, a new voice) replaces a chapter's blob, so
+// the ref this page holds stops naming anything. Two things keep the old sound:
+// the session's blob cache is keyed by that old ref, and `player.chapters` is a
+// snapshot of the listing the transport reads. Neither notices a refresh does.
+// So when a book is re-read, prune the refs it no longer names, move the player
+// onto the fresh listing, and if the chapter on deck was replaced, reload it
+// where it was left instead of replaying what the fix was meant to change.
+function audioRefs(chapters) {
+  const out = [];
+  (chapters || []).forEach(c => {
+    if (!c) return;
+    if (c.audio_ref) out.push(c.audio_ref);
+    (c.renditions || []).forEach(r => { if (r && r.audio_ref) out.push(r.audio_ref); });
+  });
+  return out;
+}
+
+async function syncBookAudio(id, prev, chapters) {
+  if (!prev || !prev.chapters) return;
+  const keep = new Set(audioRefs(chapters));
+  const replaced = new Set();
+  prev.chapters.forEach(c => {
+    const old = audioRefs([c]).filter(r => !keep.has(r));
+    if (!old.length) return;
+    replaced.add(c.idx);
+    old.forEach(r => cache.delete(r));
+    cache.delete(id + ':' + c.idx);
+  });
+  if (player && player.id === id) player.chapters = chapters;
+  if (!replaced.size || !player || player.id !== id || pcur < 0) return;
+  if (!replaced.has(pcur)) return;
+  const a = $('#audio');
+  const at = a.currentTime || 0, wasPlaying = !a.paused;
+  try {
+    await playSelection(book, pcur, wasPlaying);
+    const seek = () => { try { a.currentTime = Math.min(at, a.duration || at); } catch (_) {} };
+    if (a.readyState >= 1) seek(); else a.addEventListener('loadedmetadata', seek, { once: true });
+  } catch (_) { /* the chapter still plays from its card */ }
+}
+
 // --- book + chapters -------------------------------------------------------
-// View a book: load its page. This never touches playback and never rewrites
-// the book you are listening to; opening a book is a look, not a load. The one
-// change it makes is `book` (the page), and `cur = -1` (no chapter pinned yet).
+// View a book: load its page. Opening a book is a look, not a load - it does not
+// switch what is playing. The two exceptions are honest ones: `book` becomes the
+// page and `cur = -1` (no chapter pinned yet), and if this book's audio was
+// re-encoded while it was loaded, the chapter on deck is reloaded (syncBookAudio)
+// rather than left pointing at audio the fix already replaced.
 async function openBook(id, jumpPlay) {
   if (!id) return; $('#err').textContent = '';
   try {
+    const prev = (book && book.id === id) ? book
+      : (player && player.id === id ? { chapters: player.chapters } : null);
     const prog = await api('/progress?user=' + encodeURIComponent(USER) + '&book=' + encodeURIComponent(id));
     const meta = bookById(id) || { title: '(book)' };
     const bk = prog.book || {};
@@ -2661,6 +2711,7 @@ async function openBook(id, jumpPlay) {
              isbn: bk.isbn || '', author: bk.author || '',
              description: bk.description || '', publisher: bk.publisher || '',
              published: bk.published || '', chapters: prog.chapters || [] };
+    await syncBookAudio(id, prev, book.chapters);
     SELECT.clear();
     selVoice = defaultVoiceKey();       // the newest voice, until the reader picks another
     refreshStates();
