@@ -32,6 +32,7 @@ import os
 import re
 import socket
 import threading
+import unicodedata
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,6 +47,18 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(BASE_DIR, "ui")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 HOST_VERSION = "2.0"
+
+# The phrase that proves an account with no password really means to delete
+# itself. The page's placeholder is translated, so the typed phrase is too: the
+# check is on the user's intent, not on English spelling.
+DELETE_PHRASES = {"delete my account", "eliminar mi cuenta"}
+
+
+def _norm_confirm(value):
+    """Lowercase, trim, and fold accents so 'Eliminar mi Cuenta' counts."""
+    text = (value or "").strip().lower()
+    folded = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in folded if not unicodedata.combining(c))
 
 
 def _sale_offer(provider, speech, cred):
@@ -2209,7 +2222,7 @@ class App:
             if not auth.local_password_proof(self.conn, uid,
                                              body.get("password") or ""):
                 return 403, {"error": "wrong password"}
-        elif (body.get("confirm") or "").strip().lower() != "delete my account":
+        elif _norm_confirm(body.get("confirm")) not in DELETE_PHRASES:
             return 400, {"error": "confirm",
                          "detail": "type 'delete my account' to confirm"}
         billing_out = self._cancel_billing_for(uid)
