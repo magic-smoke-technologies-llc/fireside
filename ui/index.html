@@ -300,19 +300,7 @@
   .smeta .row{margin:4px 0}
   .smeta .desc{white-space:pre-wrap;margin-top:8px}
 </style>
-<script data-t="/* Fireside native bridge hook. In the Android shell, window.NativeMedia raises a
-   foreground media service so playback survives screen lock / backgrounding.
-   Absent in a plain browser, so this is a harmless no-op there. */
-(function () {
-  if (window.__fsNativeMediaHooked) return;
-  window.__fsNativeMediaHooked = true;
-  function nm(name) { try { if (window.NativeMedia &amp;&amp; window.NativeMedia[name]) window.NativeMedia[name](); } catch (e) {} }
-  if (!window.HTMLMediaElement) return;
-  var proto = HTMLMediaElement.prototype;
-  var _play = proto.play, _pause = proto.pause;
-  proto.play = function () { nm(&#x27;start&#x27;); return _play.apply(this, arguments); };
-  proto.pause = function () { nm(&#x27;stop&#x27;); return _pause.apply(this, arguments); };
-})();">
+<script>
 /* Fireside native bridge hook. In the Android shell, window.NativeMedia raises a
    foreground media service so playback survives screen lock / backgrounding.
    Absent in a plain browser, so this is a harmless no-op there. */
@@ -1032,8 +1020,7 @@ if ($('#settabs')) document.querySelectorAll('#settabs button').forEach(b => b.o
   if (!sel || !I) return;
   const list = (I.locales && I.locales.length) ? I.locales : [{ code: I.locale, name: I.locale }];
   sel.innerHTML = list.map(l =>
-    '<option value="' + l.code + '"' + (l.code === I.locale ? ' selected' : '') + ' data-t="&#x27; +
-    (l.dir === &#x27;rtl&#x27; ? l.name + &#x27; (RTL)&#x27; : l.name) + &#x27;">' +
+    '<option value="' + l.code + '"' + (l.code === I.locale ? ' selected' : '') + '>' +
     (l.dir === 'rtl' ? l.name + ' (RTL)' : l.name) + '</option>').join('');
   sel.onchange = () => I.setLocale(sel.value);
 })();
@@ -3854,7 +3841,7 @@ async function sbLoadVoices() {
     const d = await jpost('/voices', { connection_id: cid });
     SB_VOICES = d.voices || [];
   } catch (e) {
-    SB_VOICES = []; sel.innerHTML = '<option value="" data-t="&#x27; + (e.message || &#x27;voices failed&#x27;) + &#x27;">' + (e.message || 'voices failed') + '</option>'; return;
+    SB_VOICES = []; sel.innerHTML = '<option value="" data-t="' + (e.message || 'voices failed') + '">' + (e.message || 'voices failed') + '</option>'; return;
   }
   sel.innerHTML = '';
   fillVoices(sel, SB_VOICES, PREFS.default_voice || null);   // hear your default first
