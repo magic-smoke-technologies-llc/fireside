@@ -181,6 +181,65 @@ class SecondFactorOverHTTP(unittest.TestCase):
             self._post("/2fa/disable", {"code": "123456"})
         self.assertEqual(cm.exception.code, 403)
 
+    def test_replacing_a_live_factor_needs_the_live_factor(self):
+        # Without this, a stolen session could point the second factor at its
+        # own phone and keep the archive. The refusal must also leave the real
+        # secret alone.
+        uid = self._register("chris")
+        info, _out = self._enrol()
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self._post("/2fa/enroll", {})
+        self.assertEqual(cm.exception.code, 401)
+        self.assertTrue(json.loads(cm.exception.read()).get("needs_proof"))
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self._post("/2fa/enroll", {"code": "000000"})
+        self.assertEqual(cm.exception.code, 401)
+        # a code from the next step still opens it: the refusal touched nothing
+        still = totp.totp(info["secret"], at=time.time() + 30)
+        self.assertTrue(auth.check_code(self.app.conn, uid, still))
+
+    def test_change_the_authenticator_with_a_current_code(self):
+        uid = self._register("chris")
+        info, _out = self._enrol()
+        code = totp.totp(info["secret"], at=time.time() + 30)
+        with self._post("/2fa/enroll", {"code": code}) as r:
+            new = json.loads(r.read())
+        self.assertTrue(new["changing"])
+        self.assertNotEqual(new["secret"], info["secret"])
+        # the old app is dead the moment the secret is replaced
+        self.assertFalse(auth.check_code(
+            self.app.conn, uid, totp.totp(info["secret"], at=time.time() + 30)))
+        # the fresh secret is live only after it is proven
+        with self._post("/2fa/confirm", {
+                "code": totp.totp(new["secret"], at=time.time() + 30)}) as r:
+            out = json.loads(r.read())
+        self.assertEqual(len(out["recovery"]), totp.RECOVERY_CODES)
+
+    def test_lost_phone_change_goes_through_a_recovery_code(self):
+        self._register("chris")
+        _info, out = self._enrol()
+        with self._post("/2fa/enroll", {"recovery": out["recovery"][0]}) as r:
+            new = json.loads(r.read())
+        self.assertTrue(new["changing"])
+        self.assertTrue(new["secret"])
+
+    def test_an_admin_can_switch_it_off_when_the_server_does_not_require_it(self):
+        # required = this deployment forces a factor; with the switch off the
+        # admin owns their own login and the panel must say so.
+        uid = self._register("chris")
+        info, _out = self._enrol()
+        old = os.environ.pop("FIRESIDE_REQUIRE_2FA", None)
+        try:
+            s, st = self._jget("/2fa")
+            self.assertFalse(st["required"])
+            self.assertTrue(st["can_disable"])
+            code = totp.totp(info["secret"], at=time.time() + 30)
+            with self._post("/2fa/disable", {"code": code}) as r:
+                self.assertEqual(r.status, 200)
+            self.assertFalse(auth.enrolled(self.app.conn, uid))
+        finally:
+            os.environ["FIRESIDE_REQUIRE_2FA"] = old if old is not None else "1"
+
     def test_a_half_session_can_still_sign_out(self):
         self._register("chris")
         with self._post("/auth/logout", {}) as r:

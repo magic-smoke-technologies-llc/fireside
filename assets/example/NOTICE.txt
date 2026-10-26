@@ -11,6 +11,13 @@ Redmond, and cleaned for reading: the Gutenberg header and footer, the table of
 contents, the dedication, the illustration markers and the hard line wraps were
 removed, and each of the five stories is one chapter.
 
+cover.jpg is the cover Project Gutenberg publishes for that ebook
+(https://www.gutenberg.org/cache/epub/902/pg902.cover.medium.jpg), a scan of the
+1888 title page: "The Happy Prince and Other Tales, by Oscar Wilde, illustrated
+by Walter Crane and Jacomb Hood". The title page is public domain along with the
+text. It is 200x274, so it is honest at shelf size and soft full-screen; replace
+it with a better scan if one turns up.
+
 Project Gutenberg is a trademark of the Project Gutenberg Literary Archive
 Foundation. The underlying text is public domain; this file is redistributed
 under that public-domain status.
