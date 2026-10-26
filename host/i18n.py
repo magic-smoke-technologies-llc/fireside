@@ -141,20 +141,36 @@ def _render_text(chunk, messages):
 
 
 def _render_attrs(chunk, messages):
-    """Translate the attribute a marker names, and the raw one beside it."""
-    for marker, attr in (("data-t-ph", "placeholder"), ("data-t-title", "title"),
-                         ("data-t-aria", "aria-label")):
-        pat = re.compile(r'%s="([^"]*)"' % marker)
+    """Translate the attribute a marker names, in place.
 
-        def swap(m, attr=attr, marker=marker):
+    Not beside it: this used to append the translation and leave the English on
+    the tag, which is `aria-label="Play" aria-label="Reproducir"`. A browser
+    keeps the first of two identical attributes, so the English won and a
+    Spanish reader got Spanish labels with English screen-reader names. Found
+    by reading the served page instead of the source.
+    """
+    markers = (("data-t-ph", "placeholder"), ("data-t-title", "title"),
+               ("data-t-aria", "aria-label"))
+
+    def one_tag(tag):
+        for marker, attr in markers:
+            m = re.search(r'%s="([^"]*)"' % marker, tag)
+            if not m:
+                continue
             text = messages.get(html.unescape(m.group(1)))
             if text is None:
-                return m.group(0)
-            return '%s="%s" %s="%s"' % (attr, html.escape(text),
-                                        marker, m.group(1))
+                continue
+            value = html.escape(text, quote=True)
+            # An attribute is always preceded by whitespace, which is what keeps
+            # this off `data-t-title` when the attribute is `title`.
+            have = re.compile(r'(?<=\s)%s="[^"]*"' % re.escape(attr))
+            if have.search(tag):
+                tag = have.sub('%s="%s"' % (attr, value), tag, count=1)
+            else:
+                tag = tag.replace(m.group(0), '%s="%s" %s' % (attr, value, m.group(0)), 1)
+        return tag
 
-        chunk = pat.sub(swap, chunk)
-    return chunk
+    return re.sub(r"<[a-zA-Z][^>]*>", lambda m: one_tag(m.group(0)), chunk)
 
 
 def render(page, cat):

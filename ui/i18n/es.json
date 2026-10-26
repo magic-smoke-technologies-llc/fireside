@@ -195,6 +195,19 @@
     "Add this key to your authenticator app, then type the six digits it shows.": "Añade esta clave a tu app de autenticación y luego escribe los seis dígitos que muestra.",
     "Six-digit code": "Código de seis dígitos",
     "Recovery code": "Código de recuperación",
-    "Check the code": "Comprobar el código"
+    "Check the code": "Comprobar el código",
+    "Contrast and colour. Stored in this browser, so each device can differ.": "Contraste y color. Se guarda en este navegador, así que cada dispositivo puede ser distinto.",
+    "Dark": "Oscuro",
+    "Display": "Pantalla",
+    "Follow this device": "Seguir este dispositivo",
+    "High contrast": "Alto contraste",
+    "High contrast uses white on black with thicker borders, and the status marks are told apart by shape as well as colour.": "El alto contraste usa blanco sobre negro con bordes más gruesos, y las marcas de estado se distinguen por la forma además del color.",
+    "Light": "Claro",
+    "Player": "Reproductor",
+    "Sections": "Secciones",
+    "Skip to content": "Ir al contenido",
+    "Theme": "Tema",
+    "Settings sections": "Secciones de ajustes",
+    "Switch between signing in and creating an account": "Cambiar entre iniciar sesión y crear una cuenta"
   }
 }
