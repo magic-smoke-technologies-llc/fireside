@@ -113,9 +113,23 @@ class TestSpanishPage(unittest.TestCase):
         status, body = self.get("/?lang=es")
         assert status == 200
         assert '<html lang="es" dir="ltr"' in body
-        # the catalog the page is rendered with carries Spanish, not English
-        assert "Iniciar sesi" in body or "Entrar" in body
+        # The markup itself is Spanish, not English waiting for the script:
+        # asserting "the catalog contains Español" would pass while a Spanish
+        # reader still reads English navigation until JS runs.
+        assert 'data-t="Sign in">Entrar<' in body
+        assert 'data-t="Library">Biblioteca<' in body
+        assert 'data-t="Sign in">Sign in<' not in body
         assert '"Español"' in body
+
+    def test_english_markup_is_untouched(self):
+        status, body = self.get("/")
+        assert status == 200
+        assert 'data-t="Sign in">Sign in<' in body
+
+    def test_a_tooltip_is_translated_too(self):
+        status, body = self.get("/?lang=es")
+        assert status == 200
+        assert 'title="Capítulo anterior"' in body
 
     def test_english_is_still_the_default(self):
         status, body = self.get("/")
