@@ -80,6 +80,47 @@ class TextFinder(HTMLParser):
         self.stack[-1] = (t, has_child, (text or "") + d, has_dt)
 
 
+# Script and style bodies are code, not copy. The marking passes are regexes
+# over the page, and a regex cannot tell the two apart: a <script> whose body
+# happens to contain no '<' matches the element rule, and the "fix" is a data-t
+# attribute carrying the block's own source (html-escaped). That is the blank
+# page of #173 and #175, arriving from the tool that was meant to catch it.
+OPAQUE = re.compile(r"(<script\b.*?</script>|<style\b.*?</style>)", re.S | re.I)
+
+
+DUPLICABLE = ("data-t", "data-t-ph", "data-t-title", "data-t-aria")
+
+
+def dedupe_marked_attrs(chunk):
+    """Keep the first copy of each data-t* attribute on a tag.
+
+    Repeated runs of this tool used to append the same marker again, and the
+    page ends up with three identical attributes on one button: invalid HTML
+    that browsers read by first-wins, so it works by accident.
+    """
+    def one_tag(m):
+        tag = m.group(0)
+        for name in DUPLICABLE:
+            pat = re.compile(r'(\s%s="[^"]*")' % name)
+            kept = []
+
+            def keep(mm):
+                if kept:
+                    return ""
+                kept.append(1)
+                return mm.group(1)
+
+            tag = pat.sub(keep, tag)
+        return tag
+    return re.sub(r"<[a-zA-Z][^<>]*>", one_tag, chunk)
+
+
+def map_outside(src, fn):
+    """Apply fn to the markup around script/style blocks, never inside them."""
+    return "".join(part if i % 2 else fn(part)
+                   for i, part in enumerate(OPAQUE.split(src)))
+
+
 def analyse():
     src = open(PAGE, encoding="utf-8").read()
     f = TextFinder()
@@ -123,13 +164,15 @@ def write():
         tag, attrs, text = m.group(1), m.group(2), m.group(3)
         v = html.unescape(text.strip())
         if not v or not WORDISH.search(v) or (' data-t=' in attrs) \
-                or v in marked:
+                or v in marked or PLACEHOLDER.search(v):
             return m.group(0)
         # the key is written down, not inferred: textContent would decode
         # &amp; and the key would not match what the page looked up.
         return '<%s%s data-t="%s">%s</%s>' % (tag, attrs, esc(v), text, tag)
 
-    marked_src = re.sub(r"<([a-zA-Z0-9]+)([^<>]*[^/]?)>([^<]+)</\1>", mark, src)
+    marked_src = map_outside(
+        src, lambda chunk: re.sub(r"<([a-zA-Z0-9]+)([^<>]*[^/]?)>([^<]+)</\1>",
+                                  mark, chunk))
 
     # 2) mark attributes by adding data-t-ph / data-t-title / data-t-aria next to them
     for name, kind in ATTRS:
@@ -138,10 +181,13 @@ def write():
                 return m.group(0)
             return '%s="%s" %s="%s"' % (name, m.group(1), kind,
                                         esc(html.unescape(m.group(1))))
-        marked_src = re.sub(
-            r'\b%s="([^"]*[A-Za-z]{2,}[^"]*)"(\s+%s="[^"]*")?' % (name, kind),
-            lambda m, name=name, kind=kind: m.group(0) if m.group(2) else mark_attr(m),
-            marked_src)
+        marked_src = map_outside(
+            marked_src,
+            lambda chunk, name=name, kind=kind: re.sub(
+                r'\b%s="([^"]*[A-Za-z]{2,}[^"]*)"(\s+%s="[^"]*")?' % (name, kind),
+                lambda m: m.group(0) if m.group(2) else mark_attr(m), chunk))
+
+    marked_src = map_outside(marked_src, dedupe_marked_attrs)
 
     if marked_src != src:
         open(PAGE, "w", encoding="utf-8").write(marked_src)
