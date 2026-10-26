@@ -11,15 +11,17 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from host import auth, payments
+from host import auth, payments, totp
 from host.app import App, make_handler
 from tests.test_app import READER_BODY, SPEECH_BODY, STORAGE_BODY
 from tests.test_pluginhost import write_plugin
+from tests import twofa_support
 
 PROVIDERS = {
     "fake": {
@@ -87,6 +89,20 @@ class Base(unittest.TestCase):
                                      headers={"Content-Type": "application/json"})
         return self.plain.open(req)
 
+    def _signup(self, name):
+        """Register the first account and clear its factor.
+
+        The first account is the administrator, and an administrator always owes
+        a second factor, so every door that needs a live session needs this.
+        """
+        r = self.post("/auth/local/register",
+                      {"username": name, "password": "longenough"})
+        out = json.loads(r.read())
+        if out.get("admin"):
+            twofa_support.enrol(
+                lambda path, obj: json.loads(self.post(path, obj).read()), name)
+        return out
+
     def status(self, fn, *a, **kw):
         try:
             with fn(*a, **kw) as r:
@@ -147,11 +163,19 @@ class TestDispatch(Base):
 
     def test_bearer_token_counts_as_a_session(self):
         s = auth.local_register(self.app.conn, "bearer", "longenough", "")
+        # first account = administrator = always owes a factor; clear it in the
+        # database so this test stays about the Authorization header.
+        info = auth.begin_enroll(self.app.conn, s)
+        auth.confirm_enroll(self.app.conn, s,
+                            totp.totp(info["secret"], at=time.time()))
 
         class H:
             SESSION_COOKIE = auth.SESSION_COOKIE
 
         tok = auth.create_session(self.app.conn, s, "local")
+        # a bearer token is a session like any other, so it goes through the
+        # same factor: finish it rather than pretend the gate is not there.
+        auth.satisfy_factor(self.app.conn, tok)
         self.app.require_auth = True
         req = urllib.request.Request(self.url("/me"),
                                      headers={"Authorization": "Bearer " + tok})
@@ -211,7 +235,7 @@ class TestAuthDoors(Base):
         self.assertEqual(code, 401)
 
     def test_password_change_swaps_the_password(self):
-        self.post("/auth/local/register", {"username": "surf", "password": "longenough"})
+        self._signup("surf")
         r = self.post("/account/password",
                       {"current": "longenough", "password": "anotherpass"})
         self.assertEqual(r.status, 200)
@@ -223,14 +247,14 @@ class TestAuthDoors(Base):
                          "local:surf")
 
     def test_password_change_refuses_a_wrong_current_one(self):
-        self.post("/auth/local/register", {"username": "surf", "password": "longenough"})
+        self._signup("surf")
         code, r = self.status(self.post, "/account/password",
                               {"current": "not-it-at-all", "password": "anotherpass"})
         self.assertEqual(code, 400)
         self.assertIn("current password", json.loads(r.read())["error"])
 
     def test_password_change_shows_has_password_on_me(self):
-        self.post("/auth/local/register", {"username": "surf", "password": "longenough"})
+        self._signup("surf")
         me = json.loads(self.get("/me").read())
         self.assertTrue(me["has_password"])
 
