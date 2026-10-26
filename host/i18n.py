@@ -12,6 +12,7 @@ never renders in one language and then swaps to another.
 """
 
 import glob
+import html
 import json
 import os
 import re
@@ -112,6 +113,62 @@ def negotiate(query_lang=None, cookie_lang=None, accept_language=None, codes=Non
     return _from_accept_language(accept_language, codes) or DEFAULT
 
 
+_OPAQUE = re.compile(r"(<script\b.*?</script>|<style\b.*?</style>)", re.S | re.I)
+_TEXT_EL = re.compile(r'(<[a-zA-Z][^>]*\bdata-t="([^"]*)"[^>]*>)([^<>]*)(</[a-zA-Z][^>]*>)')
+
+
+def _outside_scripts(page, fn):
+    return "".join(part if i % 2 else fn(part)
+                   for i, part in enumerate(_OPAQUE.split(page)))
+
+
+def _render_text(chunk, messages):
+    """Swap the English shown in a marked element for its translation.
+
+    The catalog arriving with the page is not the page being in that language:
+    the app script has to run before data-t elements change, so a Spanish
+    reader sees English navigation until JS executes. Doing the swap here means
+    the first paint is already Spanish, and the page still reads in that
+    language if the script never runs.
+    """
+    def one(m):
+        open_tag, key, inner, close_tag = m.group(1), m.group(2), m.group(3), m.group(4)
+        text = messages.get(html.unescape(key))
+        if text is None or not inner.strip():
+            return m.group(0)
+        return open_tag + html.escape(text, quote=False) + close_tag
+    return _TEXT_EL.sub(one, chunk)
+
+
+def _render_attrs(chunk, messages):
+    """Translate the attribute a marker names, and the raw one beside it."""
+    for marker, attr in (("data-t-ph", "placeholder"), ("data-t-title", "title"),
+                         ("data-t-aria", "aria-label")):
+        pat = re.compile(r'%s="([^"]*)"' % marker)
+
+        def swap(m, attr=attr, marker=marker):
+            text = messages.get(html.unescape(m.group(1)))
+            if text is None:
+                return m.group(0)
+            return '%s="%s" %s="%s"' % (attr, html.escape(text),
+                                        marker, m.group(1))
+
+        chunk = pat.sub(swap, chunk)
+    return chunk
+
+
+def render(page, cat):
+    """The page with the catalog already applied to its markup."""
+    messages = cat.get("messages") or {}
+    if cat.get("locale") == DEFAULT or not messages:
+        return page
+
+    def per_chunk(chunk):
+        return _render_attrs(_render_text(chunk, messages), messages)
+
+    return _outside_scripts(page, per_chunk)
+
+
 def inject(page, code=None, cookies=None, query=None, accept_language=None):
     """Return the page with lang/dir and the catalog spliced in.
 
@@ -129,6 +186,7 @@ def inject(page, code=None, cookies=None, query=None, accept_language=None):
     blob = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
     script = ('<script src="/i18n.js"></script>\n'
               '<script>window.__FS_I18N__=' + blob + ';</script>\n')
+    page = render(page, {"locale": code, "messages": cat["messages"]})
     page = re.sub(r'<html lang="[^"]*"', '<html lang="%s" dir="%s"' % (code, cat["dir"]),
                   page, count=1)
     if "</head>" in page:
