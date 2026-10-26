@@ -488,6 +488,7 @@ class App:
                                    % (max(0, incoming - already), left)}
         if existing:
             swapped = library.replace_book(self.conn, self.storage, existing, book)
+            self._file_meta(existing, book)
             self._maybe_cover(existing, book)
             out = {"book_id": existing, "title": getattr(book, "title", ""),
                    "chapters": len(getattr(book, "chapters", [])),
@@ -495,6 +496,7 @@ class App:
             out.update(swapped)
             return 200, out
         bid = library.add_book(self.conn, self.storage, user, book)
+        self._file_meta(bid, book)
         self._maybe_cover(bid, book)
         return 200, {"book_id": bid, "title": getattr(book, "title", ""),
                      "chapters": len(getattr(book, "chapters", []))}
@@ -587,6 +589,32 @@ class App:
 
     COVER_MAX_BYTES = 8 * 1024 * 1024
     _COVER_URLS = ("https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false",)
+
+    def _file_meta(self, book_id, book):
+        """Whatever the file itself stated about the book, written down.
+
+        Only fields the file actually carried, and only author and series from
+        explicit metadata: dc:creator, calibre:series. A reader's own edit wins,
+        so a replacement import never overwrites what someone typed. Absent
+        stays absent, which is what makes the scopes honest: a book with no
+        author belongs to the unknown bucket rather than to a guess.
+        """
+        meta = getattr(book, "meta", None) or {}
+        if not isinstance(meta, dict):
+            return
+        row = self.conn.execute("SELECT user_edited FROM books WHERE id=?",
+                                (book_id,)).fetchone()
+        if row and (row["user_edited"] or 0):
+            return
+        fields = {}
+        for key, col in (("author", "author"), ("series", "series_name"),
+                         ("series_index", "series_index"),
+                         ("publisher", "publisher"), ("published", "published")):
+            v = str(meta.get(key) or "").strip()
+            if v:
+                fields[col] = v[:255]
+        if fields:
+            library.set_details(self.conn, book_id, **fields)
 
     def _maybe_cover(self, book_id, book):
         data = getattr(book, "cover", None)
@@ -1075,7 +1103,8 @@ class App:
         # nothing. The whole-book estimate is the storage question, not the
         # money question, so the two are kept apart.
         rules = pron.for_book(pron.load(self.conn, user), book_id,
-                              pron.book_author(self.conn, book_id))
+                              pron.book_author(self.conn, book_id),
+                              pron.book_series(self.conn, book_id))
         fresh = jobs.stale_book_chars(self.conn, self.storage, speech, book_id, todo,
                                       rules, voice, model, speed)
         res_id = None
@@ -1962,6 +1991,53 @@ class App:
         return 200, {"ok": True,
                      "rules": pron.save(self.conn, uid, body.get("rules"))}
 
+    def pron_dicts(self, q, body):
+        """Every dictionary this user has, with its scope and words."""
+        uid = self._uid(q, body)
+        if not uid:
+            return 401, {"error": "auth required"}
+        one = q.get("id") or ""
+        if one:
+            got = pron.export_dict(self.conn, uid, one)
+            if not got:
+                return 404, {"error": "no such dictionary"}
+            return 200, got
+        return 200, {"dicts": pron.dicts(self.conn, uid),
+                     "scopes": list(pron.SCOPES),
+                     "unknown": {"author": pron.UNKNOWN_AUTHOR,
+                                 "series": pron.UNKNOWN_SERIES}}
+
+    def pron_dict_save(self, q, body):
+        """Create or update one dictionary, or import one from a file."""
+        uid = self._uid(q, body)
+        if not uid:
+            return 401, {"error": "auth required"}
+        if body.get("import"):
+            got = pron.import_dict(self.conn, uid, body.get("dict") or body.get("rules"),
+                                   body.get("scope"), body.get("scope_key"),
+                                   body.get("name") or "")
+            if not got:
+                return 400, {"error": "not a dictionary file"}
+            return 200, {"ok": True, "dict": got}
+        got = pron.save_dict(self.conn, uid, body.get("name") or "",
+                             body.get("scope") or "global",
+                             body.get("scope_key") or "",
+                             body.get("rules") or [],
+                             body.get("id") or "")
+        if not got:
+            return 400, {"error": "a scope needs a name to attach to"}
+        return 200, {"ok": True, "dict": got}
+
+    def pron_dict_delete(self, q, body):
+        uid = self._uid(q, body)
+        if not uid:
+            return 401, {"error": "auth required"}
+        did = body.get("id") or q.get("id") or ""
+        if not did:
+            return 400, {"error": "which dictionary?"}
+        pron.delete_dict(self.conn, uid, did)
+        return 200, {"ok": True}
+
     def pron_impact(self, q, body):
         """Which already-voiced chapters a rule change makes out of date.
 
@@ -2252,7 +2328,7 @@ GET_ROUTES = {
     "/estimate": "estimate",
     "/position": "get_position", "/last": "last_position", "/stop": "stop", "/text": "text",
     "/stats": "stats_get", "/pron": "pron_get",
-    "/pron/impact": "pron_impact",
+    "/pron/impact": "pron_impact", "/pron/dicts": "pron_dicts",
     "/connections": "connections_list", "/source-creds": "source_creds",
     "/cover": "cover_get",
     "/auth/providers": "auth_providers", "/me": "me", "/auth/policy": "auth_policy",
@@ -2282,7 +2358,9 @@ POST_ROUTES = {
     "/connections": "connection_save", "/connections/delete": "connection_delete",
     "/source-creds": "source_cred_save", "/source-creds/delete": "source_cred_delete",
     "/connections/override": "connection_override", "/prefs": "prefs_set",
-    "/pron": "pron_set", "/credits/purchase": "credits_purchase",
+    "/pron": "pron_set", "/pron/dicts": "pron_dict_save",
+    "/pron/dicts/delete": "pron_dict_delete",
+    "/credits/purchase": "credits_purchase",
     "/grants": "grants_set",
     "/admin/plan": "plans_admin_set",
     "/billing/checkout": "billing_checkout", "/billing/confirm": "billing_confirm",

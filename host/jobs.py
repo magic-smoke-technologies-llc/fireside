@@ -341,7 +341,8 @@ def render_book(conn, storage, speech, user_id, book_id, voice="", model="",
     # what it finished while a changed rule makes just the affected chapters
     # redo. The tag covers only the rules that match each chapter's text.
     rules = pron.for_book(pron.load(conn, user_id), book_id,
-                          pron.book_author(conn, book_id))
+                          pron.book_author(conn, book_id),
+                          pron.book_series(conn, book_id))
     tokens = {}
     for i in idxs:
         try:
