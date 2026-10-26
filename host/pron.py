@@ -6,11 +6,18 @@ appears in the text; `to` is how it should sound, spelled out for the engine
 the chapter text before any speech engine sees it, so every engine gets the fix,
 including the local one that cannot take phonemes.
 
-A rule is global (every book this user has), or scoped to an author, or to one
-book, because a fic's money glyphs are usually the author's own convention and
-sometimes just one story's. Global is the default. Rules live as JSON in
-user_prefs.pron: `book` holds a book id, `author` an author name, both empty for
-a global rule. Most specific wins.
+Rules live in named dictionaries, and a dictionary is attached at one scope:
+global (every book this user has), author, series, or one book. A fic's money
+glyphs are usually the author's own convention and sometimes just one story's,
+and a series repeats its names book after book, which is why the words move out
+of one book and into a file that can be attached, exported, and handed on.
+Resolution is Book > Series > Author > Global; the narrowest statement wins.
+A scope nobody could establish (no dc:creator, no series metadata) is not
+guessed: those books fall into the unknown bucket, which a dictionary can be
+attached to.
+
+The old shape, one flat list in user_prefs.pron with `book`/`author` keys, is
+still read once and folded into dictionaries by migrate().
 
 Numbers are handled here too, since it is the same problem: text a voice would
 misread. A comma-grouped number ("50,000") makes most engines say the commas
@@ -22,6 +29,7 @@ exactly as the author wrote it.
 import hashlib
 import json
 import re
+import uuid
 
 from host.db import now
 
@@ -78,12 +86,42 @@ def expand_numbers(text):
     return GROUPED.sub(lambda m: number_words(int(m.group(0).replace(",", ""))), text)
 
 
-def load(conn, uid):
-    """This user's list, tidied: [{'from': word, 'to': respelling}].
+# A book with no dc:creator still has to land somewhere, or its names would
+# escape every scope but the book's own. Chris's call (10-26): unknown bucket.
+UNKNOWN_AUTHOR = "unknown author"
+UNKNOWN_SERIES = "unknown series"
 
-    Anything malformed is dropped rather than raised: one bad row must not take
-    down a render.
-    """
+SCOPES = ("global", "author", "series", "book")
+DICT_FORMAT = "fireside-pron/1"
+
+
+def _scope_of(r):
+    """Which scope a stored rule is in, whichever shape it arrived in."""
+    r = r or {}
+    if str(r.get("book") or "").strip():
+        return "book", str(r["book"]).strip()
+    if str(r.get("series") or "").strip():
+        return "series", str(r["series"]).strip()
+    if str(r.get("author") or "").strip():
+        return "author", str(r["author"]).strip()
+    return "global", ""
+
+
+def _tidy(rules):
+    """Drop blanks and duplicates within one scope, keep the first spelling."""
+    out, seen = [], set()
+    for r in rules or []:
+        frm = str((r or {}).get("from", "")).strip()
+        to = str((r or {}).get("to", "")).strip()
+        if not frm or not to or frm.lower() in seen:
+            continue
+        seen.add(frm.lower())
+        out.append({"from": frm, "to": to})
+    return out
+
+
+def _legacy_rules(conn, uid):
+    """The old flat list in user_prefs.pron, before dictionaries existed."""
     row = conn.execute("SELECT pron FROM user_prefs WHERE user_id=?",
                        (uid or "",)).fetchone()
     raw = (row["pron"] if row else "") or ""
@@ -98,68 +136,245 @@ def load(conn, uid):
         frm = str((r or {}).get("from", "")).strip()
         to = str((r or {}).get("to", "")).strip()
         if frm and to:
-            out.append(_rule(frm, to, (r or {}).get("book"), (r or {}).get("author")))
+            scope, key = _scope_of(r)
+            out.append(_rule(frm, to, key if scope == "book" else "",
+                             key if scope == "author" else "",
+                             key if scope == "series" else ""))
     return out
 
 
-def _rule(frm, to, book="", author=""):
-    """A rule's stored shape. One scope at a time: book, else author, else all."""
+def dicts(conn, uid):
+    """This user's dictionaries, oldest first, rules already tidied."""
+    out = []
+    for r in conn.execute(
+            "SELECT id,name,scope,scope_key,rules,created_at FROM pron_dicts"
+            " WHERE user_id=? ORDER BY created_at,id", (uid or "",)).fetchall():
+        try:
+            rules = json.loads(r["rules"] or "[]")
+        except Exception:
+            rules = []
+        out.append({"id": r["id"], "name": r["name"] or "",
+                    "scope": r["scope"] or "global",
+                    "scope_key": r["scope_key"] or "",
+                    "rules": _tidy(rules if isinstance(rules, list) else [])})
+    return out
+
+
+def get_dict(conn, uid, dict_id):
+    for d in dicts(conn, uid):
+        if d["id"] == dict_id:
+            return d
+    return None
+
+
+def _scope_fields(scope, key):
+    scope = str(scope or "global").strip().lower()
+    if scope not in SCOPES:
+        scope = "global"
+    key = "" if scope == "global" else str(key or "").strip()
+    if scope != "global" and not key:
+        # an author/series/book dict with no key would match nothing, silently.
+        return None
+    return scope, key
+
+
+def save_dict(conn, uid, name, scope, scope_key, rules, dict_id=""):
+    """Create or update one dictionary. Returns it, or None for a bad scope.
+
+    A dictionary is one named set of words attached at one scope. Two dicts on
+    the same scope are allowed: both apply, and the later one in the list wins a
+    word both spell, so ordering is the user's to set by when they made it.
+    """
+    fields = _scope_fields(scope, scope_key)
+    if not fields:
+        return None
+    scope, key = fields
+    clean = _tidy(rules)
+    blob = json.dumps(clean, ensure_ascii=False)
+    name = str(name or "").strip() or ("Words" if scope == "global" else "Words")
+    stamp = now()
+    if dict_id:
+        row = conn.execute("SELECT id FROM pron_dicts WHERE id=? AND user_id=?",
+                           (dict_id, uid)).fetchone()
+        if not row:
+            return None
+        conn.execute("UPDATE pron_dicts SET name=?,scope=?,scope_key=?,rules=?,"
+                     "updated_at=? WHERE id=? AND user_id=?",
+                     (name, scope, key, blob, stamp, dict_id, uid))
+    else:
+        dict_id = "pd_" + uuid.uuid4().hex[:16]
+        conn.execute("INSERT INTO pron_dicts(id,user_id,name,scope,scope_key,rules,"
+                     "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                     (dict_id, uid, name, scope, key, blob, stamp, stamp))
+    conn.commit()
+    return get_dict(conn, uid, dict_id)
+
+
+def delete_dict(conn, uid, dict_id):
+    conn.execute("DELETE FROM pron_dicts WHERE id=? AND user_id=?", (dict_id, uid))
+    conn.commit()
+    return True
+
+
+def export_dict(conn, uid, dict_id):
+    """One dictionary as a file a person can hand to someone else."""
+    d = get_dict(conn, uid, dict_id)
+    if not d:
+        return None
+    return {"format": DICT_FORMAT, "name": d["name"],
+            "scope": d["scope"], "scope_key": d["scope_key"],
+            "rules": d["rules"]}
+
+
+def import_dict(conn, uid, payload, scope=None, scope_key=None, name=""):
+    """A dictionary from a file, re-attached at this user's own scope.
+
+    The file's scope is not trusted as a target: a dict exported at one person's
+    book id or series name would point at nothing here. So the words come in and
+    the scope is chosen by the importer (default: global).
+    """
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    rules = payload.get("rules")
+    if not isinstance(rules, list):
+        return None
+    return save_dict(conn, uid, name or payload.get("name") or "Imported words",
+                     scope or "global", scope_key, rules)
+
+
+def _rule(frm, to, book="", author="", series=""):
+    """A rule's stored shape. One scope at a time: book, series, author, else all."""
     book = str(book or "").strip()
+    series = str(series or "").strip()
     author = str(author or "").strip()
     if book:
-        return {"from": frm, "to": to, "book": book, "author": ""}
-    return {"from": frm, "to": to, "book": "", "author": author}
+        return {"from": frm, "to": to, "book": book, "author": "", "series": ""}
+    if series:
+        return {"from": frm, "to": to, "book": "", "author": "", "series": series}
+    return {"from": frm, "to": to, "book": "", "author": author, "series": ""}
+
+
+def migrate(conn, uid):
+    """Fold the old flat list into dictionaries once, and clear it.
+
+    Rules that were global become one global dict; each author and each book
+    keeps its own. Nothing is dropped: a rule the old shape could hold is a rule
+    the new shape holds.
+    """
+    if not uid:
+        return 0
+    if conn.execute("SELECT id FROM pron_dicts WHERE user_id=? LIMIT 1",
+                    (uid,)).fetchone():
+        return 0
+    legacy = _legacy_rules(conn, uid)
+    if not legacy:
+        return 0
+    groups = {}
+    for r in legacy:
+        scope, key = _scope_of(r)
+        groups.setdefault((scope, key), []).append({"from": r["from"], "to": r["to"]})
+    titles = {}
+    for (scope, key), rules in groups.items():
+        name = "My words"
+        if scope == "book":
+            row = conn.execute("SELECT title FROM books WHERE id=?", (key,)).fetchone()
+            name = "Words for %s" % ((row["title"] if row else "") or "this book")
+        elif scope == "author":
+            name = "Words for %s" % key
+        elif scope == "series":
+            name = "Words for %s" % key
+        save_dict(conn, uid, name[:255], scope, key, rules)
+        titles[(scope, key)] = name
+    row = conn.execute("SELECT user_id FROM user_prefs WHERE user_id=?", (uid,)).fetchone()
+    if row:
+        conn.execute("UPDATE user_prefs SET pron='',updated_at=? WHERE user_id=?",
+                     (now(), uid))
+    else:
+        conn.execute("INSERT INTO user_prefs(user_id,pron,updated_at) VALUES(?,?,?)",
+                     (uid, "", now()))
+    conn.commit()
+    return len(groups)
+
+
+def load(conn, uid):
+    """Every rule this user has, one flat list, oldest dictionary first.
+
+    Anything malformed is dropped rather than raised: one bad row must not take
+    down a render.
+    """
+    uid = uid or ""
+    migrate(conn, uid)
+    out = []
+    for d in dicts(conn, uid):
+        for r in d["rules"]:
+            out.append(_rule(r["from"], r["to"],
+                             d["scope_key"] if d["scope"] == "book" else "",
+                             d["scope_key"] if d["scope"] == "author" else "",
+                             d["scope_key"] if d["scope"] == "series" else ""))
+    return out
 
 
 def save(conn, uid, rules):
-    """Tidy and store the list: drop blanks, drop duplicate words, keep order.
+    """The old whole-list write, kept so an old client still behaves.
 
-    Updates the existing prefs row in place so the other columns (default
-    voice/connection) survive; only inserts when the user has no row yet.
+    It lands in the dictionaries like anything else: one dict per scope in the
+    given list. A dict the user named and did not include is left alone, because
+    this call only owns the words it was handed.
     """
-    clean, seen = [], set()
+    if rules is None:                   # nothing was said, so nothing changes
+        return load(conn, uid)
+    groups = {}
     for r in rules or []:
         frm = str((r or {}).get("from", "")).strip()
         to = str((r or {}).get("to", "")).strip()
-        one = _rule(frm, to, (r or {}).get("book"), (r or {}).get("author"))
-        key = (one["book"], one["author"].lower(), frm.lower())
-        if frm and to and key not in seen:
-            seen.add(key)
-            clean.append(one)
-    blob = json.dumps(clean, ensure_ascii=False)
-    row = conn.execute("SELECT user_id FROM user_prefs WHERE user_id=?",
-                       (uid,)).fetchone()
-    if row:
-        conn.execute("UPDATE user_prefs SET pron=?,updated_at=? WHERE user_id=?",
-                     (blob, now(), uid))
-    else:
-        conn.execute(
-            "INSERT INTO user_prefs(user_id,pron,updated_at) VALUES(?,?,?)",
-            (uid, blob, now()))
-    conn.commit()
-    return clean
+        if not frm or not to:
+            continue
+        scope, key = _scope_of(r)
+        groups.setdefault((scope, key), []).append({"from": frm, "to": to})
+    keep = {d["id"] for d in dicts(conn, uid)}
+    existing = {(d["scope"], d["scope_key"]): d for d in dicts(conn, uid)}
+    for (scope, key), items in groups.items():
+        hit = existing.get((scope, key))
+        save_dict(conn, uid, hit["name"] if hit else "My words", scope, key, items,
+                  dict_id=hit["id"] if hit else "")
+        if hit:
+            keep.discard(hit["id"])
+    # a scope this call emptied has to empty, or the old client's delete is a lie
+    for (scope, key), d in existing.items():
+        if (scope, key) not in groups and d["id"] in keep:
+            delete_dict(conn, uid, d["id"])
+    return load(conn, uid)
 
 
-def for_book(rules, book_id="", author=""):
-    """The rules that apply to one book: global, then this author's, then its own.
+def for_book(rules, book_id="", author="", series=()):
+    """The rules that apply to one book: global, author, series, then its own.
 
     A more specific rule wins for the same word, because that is the narrower
     statement and the user typed it on purpose.
     """
     bid = book_id or ""
-    who = (author or "").strip().lower()
-    out = [r for r in (rules or []) if not r.get("book") and not r.get("author")]
-    if who:
-        mine = [r for r in (rules or []) if r.get("author")
-                and (r.get("author") or "").strip().lower() == who]
-        if mine:
-            words = {r["from"].lower() for r in mine}
-            out = [r for r in out if r["from"].lower() not in words] + mine
-    if bid:
-        local = [r for r in (rules or []) if r.get("book") == bid]
-        if local:
-            words = {r["from"].lower() for r in local}
-            out = [r for r in out if r["from"].lower() not in words] + local
+    who = (author or "").strip().lower() or UNKNOWN_AUTHOR
+    names = {str(s or "").strip().lower() for s in (series or ())}
+    names.discard("")
+    if not names:
+        names = {UNKNOWN_SERIES}
+
+    def layer(match):
+        return [r for r in (rules or []) if match(r)]
+
+    out = layer(lambda r: not r.get("book") and not r.get("series") and not r.get("author"))
+    for mine in (layer(lambda r: r.get("author") and (r["author"] or "").strip().lower() == who),
+                 layer(lambda r: r.get("series") and (r["series"] or "").strip().lower() in names),
+                 layer(lambda r: bid and r.get("book") == bid)):
+        if not mine:
+            continue
+        words = {r["from"].lower() for r in mine}
+        out = [r for r in out if r["from"].lower() not in words] + mine
     return out
 
 
@@ -167,6 +382,36 @@ def book_author(conn, book_id):
     """The author string stored on a book, for author-scoped rules."""
     row = conn.execute("SELECT author FROM books WHERE id=?", (book_id or "",)).fetchone()
     return (row["author"] if row else "") or ""
+
+
+def book_series(conn, book_id):
+    """Every series name this book belongs to: the epub's own, and the shelves.
+
+    Two sources, because they answer the same question. calibre:series is what
+    the file says, and a shelf is what the reader said; a rule attached to
+    either name should reach this book.
+    """
+    names = []
+    try:
+        row = conn.execute("SELECT series_name FROM books WHERE id=?",
+                           (book_id or "",)).fetchone()
+        if row and (row["series_name"] or "").strip():
+            names.append(row["series_name"].strip())
+    except Exception:                   # a database that predates the column
+        pass
+    try:
+        for r in conn.execute(
+                "SELECT s.name n FROM series_books b JOIN series s ON s.id=b.series_id"
+                " WHERE b.book_id=?", (book_id or "",)).fetchall():
+            if (r["n"] or "").strip():
+                names.append(r["n"].strip())
+    except Exception:
+        pass
+    out = []
+    for n in names:
+        if n.lower() not in {x.lower() for x in out}:
+            out.append(n)
+    return out
 
 
 def _has_space(word):
@@ -306,7 +551,7 @@ def impact(conn, storage, user_id, book_id=None, split_for=None):
     for b in conn.execute(q, tuple(args)).fetchall():
         # a rule scoped to one book only invalidates that book's audio
         who = b["author"] if "author" in b.keys() else book_author(conn, b["id"])
-        rules = for_book(all_rules, b["id"], who)
+        rules = for_book(all_rules, b["id"], who, book_series(conn, b["id"]))
         chapters = library.chapters(conn, b["id"])
         by_idx = {c["idx"]: c for c in chapters}
         rends = {}

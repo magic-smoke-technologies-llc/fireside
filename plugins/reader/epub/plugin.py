@@ -53,6 +53,38 @@ def _isbn_of(opf: str) -> str:
     return ""
 
 
+def _meta_of(opf: str) -> dict:
+    """What the file says about itself, taken only where it actually says it.
+
+    dc:creator is the author. calibre:series / calibre:series_index is the one
+    place an ebook reliably carries its series. Nothing is inferred from the
+    title: a series guessed out of "Book 2 of the Whatever" is wrong often
+    enough that a blank field the reader can fill is better. Absent means "".
+    """
+    out = {}
+    for key, tag in (("author", "dc:creator"), ("series", "calibre:series"),
+                     ("series_index", "calibre:series_index"),
+                     ("publisher", "dc:publisher"), ("published", "dc:date")):
+        m = (re.search(r"(?is)<" + tag + r"[^>]*>(.*?)</" + tag + r">", opf)
+             or re.search(r'(?is)<meta[^>]*name="' + tag + r'"[^>]*content="([^"]*)"', opf)
+             or re.search(r'(?is)<meta[^>]*property="' + tag + r'"[^>]*>(.*?)</meta>', opf))
+        if m:
+            v = text_of(m.group(1)).strip()
+            if v:
+                out[key] = v[:255]
+    # the EPUB3 spelling of the same two facts
+    for key, prop in (("series", "belongs-to-collection"),
+                      ("series_index", "group-position")):
+        if out.get(key):
+            continue
+        m = re.search(r'(?is)<meta[^>]*property="' + prop + r'"[^>]*>(.*?)</meta>', opf)
+        if m:
+            v = text_of(m.group(1)).strip()
+            if v:
+                out[key] = v[:255]
+    return out
+
+
 def _cover_of(z, manifest, opf: str, base: str):
     """The epub's own cover image as (bytes, mime), or None.
 
@@ -153,6 +185,7 @@ def parse_epub(data: bytes, name: str) -> dict:
     if not chapters:
         raise ValueError("no readable chapters found")
     out = {"title": title, "chapters": chapters, "isbn": _isbn_of(opf)}
+    out.update(_meta_of(opf))
     cov = _cover_of(z, manifest, opf, base)
     if cov:
         out["cover"], out["cover_mime"] = cov
@@ -208,6 +241,9 @@ class Epub:
         book["meta"] = {"source": self.id}
         if book.get("isbn"):
             book["meta"]["isbn"] = book["isbn"]
+        for key in ("author", "series", "series_index", "publisher", "published"):
+            if book.get(key):
+                book["meta"][key] = book[key]
         book["meta"]["identity"] = identity_of(
             req.get("data") or b"", req.get("filename") or "", book.get("isbn") or "")
         return to_book(book)

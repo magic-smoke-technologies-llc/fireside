@@ -72,11 +72,13 @@ class TestPron(unittest.TestCase):
         pron.save(self.conn, "u2", [{"from": "A", "to": "B"}])
         connections.set_prefs(self.conn, "u2", voice="v")
         self.assertEqual(pron.load(self.conn, "u2"),
-                         [{"from": "A", "to": "B", "book": "", "author": ""}])
+                         [{"from": "A", "to": "B", "book": "", "author": "",
+                           "series": ""}])
         self.assertEqual(connections.get_prefs(self.conn, "u2")["default_voice"], "v")
         connections.set_prefs(self.conn, "u2", connection_id="c1")
         self.assertEqual(pron.load(self.conn, "u2"),
-                         [{"from": "A", "to": "B", "book": "", "author": ""}])
+                         [{"from": "A", "to": "B", "book": "", "author": "",
+                           "series": ""}])
 
 
 class TestRenderAppliesPron(unittest.TestCase):
@@ -250,11 +252,11 @@ class TestPronRoutes(unittest.TestCase):
                                {"rules": [{"from": "Qui-Gon", "to": "Kwai-Gon"}]})
         self.assertEqual(st, 200)
         self.assertEqual(out["rules"], [{"from": "Qui-Gon", "to": "Kwai-Gon",
-                                         "book": "", "author": ""}])
+                                         "book": "", "author": "", "series": ""}])
         st, out = app.pron_get({"user": "u1"}, {})
         self.assertEqual(st, 200)
         self.assertEqual(out["rules"], [{"from": "Qui-Gon", "to": "Kwai-Gon",
-                                         "book": "", "author": ""}])
+                                         "book": "", "author": "", "series": ""}])
         st, out = app.pron_impact({"user": "u1"}, {})
         self.assertEqual(st, 200)
         self.assertEqual(out["chapters_affected"], 0)

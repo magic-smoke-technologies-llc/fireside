@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS series (
 CREATE TABLE IF NOT EXISTS series_books (
     series_id VARCHAR(128), book_id VARCHAR(128), place INT,
     PRIMARY KEY (series_id, book_id));
+CREATE TABLE IF NOT EXISTS pron_dicts (
+    id VARCHAR(128) PRIMARY KEY, user_id VARCHAR(128), name VARCHAR(255),
+    scope VARCHAR(16) DEFAULT 'global', scope_key VARCHAR(255) DEFAULT '',
+    rules TEXT, created_at VARCHAR(32), updated_at VARCHAR(32));
 CREATE TABLE IF NOT EXISTS render_cache (
     `key` VARCHAR(191) PRIMARY KEY, audio_ref VARCHAR(255), audio_bytes INT,
     duration_s DOUBLE, provider VARCHAR(64), voice VARCHAR(128),
@@ -285,6 +289,11 @@ _ADDED_COLUMNS = [
     ("subscriptions", "subscription_id", "VARCHAR(64) DEFAULT ''"),
     ("addons", "customer", "VARCHAR(64) DEFAULT ''"),
     ("addons", "subscription_id", "VARCHAR(64) DEFAULT ''"),
+    # the series a book's own file claims (EPUB calibre:series) and where in it,
+    # separate from the shelves a reader builds. A pronunciation dict can attach
+    # to either name; this one arrives from the file, not from the reader.
+    ("books", "series_name", "VARCHAR(255) DEFAULT ''"),
+    ("books", "series_index", "VARCHAR(32) DEFAULT ''"),
 ]
 
 

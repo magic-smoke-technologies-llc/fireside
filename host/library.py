@@ -224,7 +224,8 @@ def get_book(conn, book_id):
 
 
 # The descriptive columns a book can carry, edited from the book-settings panel.
-_DETAIL_FIELDS = ("title", "author", "isbn", "publisher", "published", "description")
+_DETAIL_FIELDS = ("title", "author", "isbn", "publisher", "published", "description",
+                  "series_name", "series_index")
 
 
 def set_details(conn, book_id, **fields):
