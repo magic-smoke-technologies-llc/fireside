@@ -774,3 +774,45 @@ class TestBalanceInHeader(unittest.TestCase):
     def test_zero_does_not_read_as_a_failure_when_nothing_is_sold(self):
         html = self._html()
         self.assertIn("avail <= 0 && !!d.sale", html)
+
+class TestInlineScriptIsCode(unittest.TestCase):
+    """What is inside <script> must be JavaScript, not escaped page text.
+
+    A marking pass that treats the whole file as HTML escaped the quotes in two
+    option strings and copied a whole block into a tag attribute. Escaped quotes
+    are a syntax error, so the browser threw away the entire app script and the
+    page loaded blank - and no test noticed, because nothing here reads the
+    inline script as code. A browser never decodes entities inside <script>, so
+    a quote that arrives as &#x27; or &quot; is always a mistake, and &amp;&amp;
+    where the source meant && is the same mistake one level down.
+    """
+
+    BAD = ("&#x27;", "&#39;", "&quot;", "&#34;", "&amp;&amp;", "&lt;script")
+
+    def test_no_escaped_entity_inside_an_inline_script(self):
+        with open(os.path.join(UI_DIR, "index.html"), encoding="utf-8") as f:
+            html = f.read()
+        starts = [m for m in range(len(html)) if html.startswith("<script", m)]
+        for lo in starts:
+            tag_end = html.find(">", lo)
+            body = tag_end + 1
+            close = html.find("</script>", body)
+            self.assertGreater(close, body, "unterminated script block")
+            block = html[body:close]
+            line0 = html[:body].count("\n") + 1
+            for bad in self.BAD:
+                off = block.find(bad)
+                self.assertEqual(off, -1,
+                    "escaped %r inside <script> at ui/index.html line %d: the "
+                    "browser does not decode entities there, so this is either a "
+                    "syntax error or dead code" % (bad, line0 + block[:off].count("\n")))
+
+    def test_every_script_tag_is_a_bare_tag(self):
+        # a marking pass put the block's own source into a data-t attribute on
+        # the tag, which silently unplugs the code it was trying to translate
+        with open(os.path.join(UI_DIR, "index.html"), encoding="utf-8") as f:
+            html = f.read()
+        for lo in [m for m in range(len(html)) if html.startswith("<script", m)]:
+            tag = html[lo:html.find(">", lo) + 1]
+            self.assertIn(tag, ("<script>", "<script type=\"module\">"),
+                          "script tag carries attributes it should not: %r" % tag[:120])
