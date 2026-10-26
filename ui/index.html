@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>fireside</title>
+<title data-t="fireside">fireside</title>
 <link rel="icon" href="/favicon.ico">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#14110f">
@@ -319,59 +319,59 @@
 <body class="locked">
 <div class="lock" id="lock" hidden>
   <form class="card" id="lockform" autocomplete="on" novalidate>
-    <div class="mark">fireside</div>
-    <p class="tag">Books and web stories, voiced.</p>
-    <h1 id="locktitle">sign in</h1>
+    <div class="mark" data-t="fireside">fireside</div>
+    <p class="tag" data-t="Books and web stories, voiced.">Books and web stories, voiced.</p>
+    <h1 id="locktitle" data-t="sign in">sign in</h1>
     <p class="sub" id="locksub"></p>
     <div class="field">
-      <label for="lockuser">Username</label>
+      <label for="lockuser" data-t="Username">Username</label>
       <input class="in" id="lockuser" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
     </div>
     <div class="field" id="lockemailwrap" hidden>
-      <label for="lockemail">Email</label>
+      <label for="lockemail" data-t="Email">Email</label>
       <input class="in" id="lockemail" name="email" type="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false">
     </div>
     <div class="field">
-      <label for="lockpass">Password</label>
+      <label for="lockpass" data-t="Password">Password</label>
       <input class="in" id="lockpass" name="password" type="password" autocomplete="current-password">
     </div>
     <div class="field" id="lockconfirm" hidden>
-      <label for="lockpass2">Confirm password</label>
+      <label for="lockpass2" data-t="Confirm password">Confirm password</label>
       <input class="in" id="lockpass2" name="password2" type="password" autocomplete="new-password">
     </div>
-    <button class="btn" id="lockgo" type="submit">Sign in</button>
+    <button class="btn" id="lockgo" type="submit" data-t="Sign in">Sign in</button>
     <p class="err" id="autherr" role="alert" aria-live="polite"></p>
-    <button class="toggle" id="lockforgot" type="button" hidden>Forgot password?</button>
+    <button class="toggle" id="lockforgot" type="button" hidden data-t="Forgot password?">Forgot password?</button>
     <button class="toggle" id="locktoggle" type="button" hidden></button>
-    <button class="toggle" id="lockplans" type="button">See plans &amp; pricing →</button>
-    <a class="toggle" href="/privacy" target="_blank" rel="noopener" style="text-decoration:none">Privacy</a>
-    <a class="toggle" href="/terms" target="_blank" rel="noopener" style="text-decoration:none">Terms</a>
+    <button class="toggle" id="lockplans" type="button" data-t="See plans &amp; pricing →">See plans &amp; pricing →</button>
+    <a class="toggle" href="/privacy" target="_blank" rel="noopener" style="text-decoration:none" data-t="Privacy">Privacy</a>
+    <a class="toggle" href="/terms" target="_blank" rel="noopener" style="text-decoration:none" data-t="Terms">Terms</a>
     <div id="lockproviders" class="sso"></div>
   </form>
 </div>
 <header>
   <div class="brand">
-    <h1>fireside</h1>
+    <h1 data-t="fireside">fireside</h1>
     <p>Books and web stories, voiced. <span id="ver">v__HOST_VERSION__</span></p>
     <div class="topright" id="who">
-      <button class="balchip" id="balchip" type="button" title="Characters left" hidden>—</button>
-      <button class="bell" id="bell" type="button" aria-label="Alerts">🔔<span class="dot"></span></button>
-      <button class="avatar" id="avatar" type="button" aria-label="Account menu">?</button>
+      <button class="balchip" id="balchip" type="button" title="Characters left" data-t-title="Characters left" data-t-title="Characters left" data-t-title="Characters left" hidden>—</button>
+      <button class="bell" id="bell" type="button" aria-label="Alerts" data-t-aria="Alerts">🔔<span class="dot"></span></button>
+      <button class="avatar" id="avatar" type="button" aria-label="Account menu" data-t-aria="Account menu">?</button>
       <div class="menu" id="usermenu" hidden>
         <div class="who" id="auth"></div>
         <div class="stats" id="stats" hidden></div>
-        <button id="menuset" type="button">Settings</button>
-        <button id="menuinstall" type="button">Install app</button>
-        <button id="signout" type="button">Sign out</button>
+        <button id="menuset" type="button" data-t="Settings">Settings</button>
+        <button id="menuinstall" type="button" data-t="Install app">Install app</button>
+        <button id="signout" type="button" data-t="Sign out">Sign out</button>
       </div>
       <div class="menu" id="alertmenu" hidden></div>
     </div>
   </div>
   <nav class="tabs" id="tabs">
-    <button data-v="lib" class="on">Library</button>
-    <button data-v="play">Now playing</button>
-    <button data-v="sand">Try a voice</button>
-    <button data-v="plans">Plans</button>
+    <button data-v="lib" class="on" data-t="Library">Library</button>
+    <button data-v="play" data-t="Now playing">Now playing</button>
+    <button data-v="sand" data-t="Try a voice">Try a voice</button>
+    <button data-v="plans" data-t="Plans">Plans</button>
   </nav>
 </header>
 <main>
@@ -381,33 +381,33 @@
     <div id="convjobs" class="convjobs" hidden></div>
     <div id="welcome" class="welcome" hidden>
       <div class="whead">
-        <h2>Get started</h2>
-        <button class="btn quiet" id="wdismiss" type="button">Dismiss</button>
+        <h2 data-t="Get started">Get started</h2>
+        <button class="btn quiet" id="wdismiss" type="button" data-t="Dismiss">Dismiss</button>
       </div>
-      <p class="sub">Fireside reads a book with a voice you control. Three steps.</p>
+      <p class="sub" data-t="Fireside reads a book with a voice you control. Three steps.">Fireside reads a book with a voice you control. Three steps.</p>
       <ol class="wsteps" id="wsteps"></ol>
     </div>
-    <div style="margin-top:28px"><button class="btn" id="addbtn" type="button">＋ Add a book</button></div>
+    <div style="margin-top:28px"><button class="btn" id="addbtn" type="button" data-t="＋ Add a book">＋ Add a book</button></div>
     <div class="addpanel" id="addpanel" hidden>
-      <p class="sub">Drop an EPUB or paste a story link. Fireside reads it, breaks it into chapters, and voices each one.</p>
-      <div class="drop" id="drop" style="margin-top:14px">Drop an <b>.epub</b> here<br><span class="small">or click to choose</span>
+      <p class="sub" data-t="Drop an EPUB or paste a story link. Fireside reads it, breaks it into chapters, and voices each one.">Drop an EPUB or paste a story link. Fireside reads it, breaks it into chapters, and voices each one.</p>
+      <div class="drop" id="drop" style="margin-top:14px">Drop an <b data-t=".epub">.epub</b> here<br><span class="small" data-t="or click to choose">or click to choose</span>
         <input type="file" id="file" accept=".epub,application/epub+zip" hidden></div>
-      <label>Or paste a story link</label>
-      <div style="display:flex;gap:8px"><input id="url" placeholder="https://…" autocomplete="off"><button id="loadurl" class="btn" style="flex:0 0 96px">Load</button></div>
+      <label data-t="Or paste a story link">Or paste a story link</label>
+      <div style="display:flex;gap:8px"><input id="url" placeholder="https://…" data-t-ph="https://…" autocomplete="off"><button id="loadurl" class="btn" style="flex:0 0 96px" data-t="Load">Load</button></div>
       <div class="addpanel" id="dupnote" hidden style="margin-top:12px;border-color:var(--flame);background:transparent">
         <p class="sub" id="duptext"></p>
         <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-          <button class="btn" id="dupgo" type="button">Replace it</button>
-          <button class="btn quiet" id="dupkeep" type="button">Keep both</button>
-          <button class="btn quiet" id="dupcancel" type="button">Cancel</button>
+          <button class="btn" id="dupgo" type="button" data-t="Replace it">Replace it</button>
+          <button class="btn quiet" id="dupkeep" type="button" data-t="Keep both">Keep both</button>
+          <button class="btn quiet" id="dupcancel" type="button" data-t="Cancel">Cancel</button>
         </div>
       </div>
-      <p class="hint">A locked AO3 work needs your cookie under Settings, or drop the work's EPUB.</p>
-      <p class="hint" style="margin-top:14px">New here? <button class="btn quiet" id="exbtn" type="button">Add the free example book</button></p>
+      <p class="hint" data-t="A locked AO3 work needs your cookie under Settings, or drop the work&#x27;s EPUB.">A locked AO3 work needs your cookie under Settings, or drop the work's EPUB.</p>
+      <p class="hint" style="margin-top:14px">New here? <button class="btn quiet" id="exbtn" type="button" data-t="Add the free example book">Add the free example book</button></p>
     </div>
-    <p class="small" id="shelflabel" style="margin:34px 0 0;display:none">On your shelf</p>
+    <p class="small" id="shelflabel" style="margin:34px 0 0;display:none" data-t="On your shelf">On your shelf</p>
     <div class="shelf" id="shelf"></div>
-    <p class="small" id="libempty" style="color:var(--faint)">Nothing here yet. Add a book to start.</p>
+    <p class="small" id="libempty" style="color:var(--faint)" data-t="Nothing here yet. Add a book to start.">Nothing here yet. Add a book to start.</p>
     <div class="legend" id="legend" style="display:none">
       <span><span class="spine"><i class="ready"></i></span>on this device</span>
       <span><span class="spine"><i class="avail"></i></span>voiced, not here</span>
@@ -419,7 +419,7 @@
 
   <!-- now playing -->
   <section class="view" id="v-play">
-    <div id="npempty" class="hint">Pick a book from the Library first.</div>
+    <div id="npempty" class="hint" data-t="Pick a book from the Library first.">Pick a book from the Library first.</div>
     <div id="np" style="display:none">
       <div class="np">
         <div class="story">
@@ -434,24 +434,24 @@
           <div class="prog" id="prog"><i id="progfill"></i></div>
           <div class="times"><span id="tcur">0:00</span><span id="tleft">−0:00</span></div>
           <div class="ctl">
-            <button id="back30" title="Back 15 seconds">−15s</button>
-            <button class="play" id="tog" aria-label="Play">▶</button>
+            <button id="back30" title="Back 15 seconds" data-t-title="Back 15 seconds" data-t-title="Back 15 seconds" data-t-title="Back 15 seconds">−15s</button>
+            <button class="play" id="tog" aria-label="Play" data-t-aria="Play">▶</button>
             <button class="spd" id="speed">1.0×</button>
           </div>
           <div id="npvoices" style="display:none;margin-top:12px"></div>
           <div class="spine" id="npspine"></div>
           <p class="small" id="npnote" style="margin-top:8px"></p>
           <div class="chaplistwrap">
-            <div class="chaplisthead"><h3>Chapters</h3></div>
+            <div class="chaplisthead"><h3 data-t="Chapters">Chapters</h3></div>
             <div id="nplist" class="chaplist"></div>
           </div>
           <div class="row" style="margin-top:14px">Characters in this book<span class="r" id="npchars">0</span></div>
           <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn" id="loadbook" type="button">Load book</button>
-            <button class="btn quiet" id="queueadd" type="button">＋ Queue</button>
-            <button class="btn quiet" id="convertbtn">Convert to voice</button>
-            <button class="btn quiet" id="offline">Download for offline</button>
-            <button class="btn quiet" id="settingsbtn" type="button">Book settings</button>
+            <button class="btn" id="loadbook" type="button" data-t="Load book">Load book</button>
+            <button class="btn quiet" id="queueadd" type="button" data-t="＋ Queue">＋ Queue</button>
+            <button class="btn quiet" id="convertbtn" data-t="Convert to voice">Convert to voice</button>
+            <button class="btn quiet" id="offline" data-t="Download for offline">Download for offline</button>
+            <button class="btn quiet" id="settingsbtn" type="button" data-t="Book settings">Book settings</button>
           </div>
         </aside>
       </div>
@@ -460,22 +460,22 @@
 
   <!-- voice sandbox: hear any voice read a line before you commit a book to it -->
   <section class="view" id="v-sand">
-    <h2>Try a voice</h2>
-    <p class="sub">Type a line, pick a voice, hear it. Nothing is saved and nothing is metered.</p>
+    <h2 data-t="Try a voice">Try a voice</h2>
+    <p class="sub" data-t="Type a line, pick a voice, hear it. Nothing is saved and nothing is metered.">Type a line, pick a voice, hear it. Nothing is saved and nothing is metered.</p>
     <label>Text <span class="small" id="sbcount">0 / 1000</span></label>
-    <textarea id="sbtext" maxlength="1000" rows="4" autocomplete="off">The quick brown fox jumps over the lazy dog. Let us hear how this one sounds.</textarea>
+    <textarea id="sbtext" maxlength="1000" rows="4" autocomplete="off" data-t="The quick brown fox jumps over the lazy dog. Let us hear how this one sounds.">The quick brown fox jumps over the lazy dog. Let us hear how this one sounds.</textarea>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px">
-      <div style="flex:1 1 220px"><label>Voice server</label><select id="sbconn"></select></div>
-      <div style="flex:1 1 220px"><label>Voice <span class="small" id="sbvname"></span></label><select id="sbvoice"><option value="">load voices…</option></select></div>
+      <div style="flex:1 1 220px"><label data-t="Voice server">Voice server</label><select id="sbconn"></select></div>
+      <div style="flex:1 1 220px"><label>Voice <span class="small" id="sbvname"></span></label><select id="sbvoice"><option value="" data-t="load voices…">load voices…</option></select></div>
     </div>
     <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
       <label style="margin:0;flex:0 0 auto">Speed <span class="small" id="sbspeedv">1.0×</span></label>
       <input id="sbspeed" type="range" min="0.5" max="2" step="0.05" value="1" style="flex:1">
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
-      <button class="btn" id="sbsay" type="button">Convert and play</button>
-      <button class="btn quiet" id="sbscan" type="button">Scan voices</button>
-      <button class="btn quiet" id="sbstop" type="button" hidden>Stop</button>
+      <button class="btn" id="sbsay" type="button" data-t="Convert and play">Convert and play</button>
+      <button class="btn quiet" id="sbscan" type="button" data-t="Scan voices">Scan voices</button>
+      <button class="btn quiet" id="sbstop" type="button" hidden data-t="Stop">Stop</button>
     </div>
     <p class="small" id="sbstatus" style="min-height:18px"></p>
     <audio id="sbaudio" controls style="width:100%;margin-top:8px;display:none"></audio>
@@ -484,167 +484,171 @@
 
   <!-- settings -->
   <section class="view" id="v-set">
-    <h2>Settings</h2>
-    <p class="sub">Voice servers and source logins live on this server. Keys never reach your browser.</p>
+    <h2 data-t="Settings">Settings</h2>
+    <p class="sub" data-t="Voice servers and source logins live on this server. Keys never reach your browser.">Voice servers and source logins live on this server. Keys never reach your browser.</p>
     <nav class="tabs settabs" id="settabs">
-      <button data-p="voice" class="on">Voice</button>
-      <button data-p="reading">Reading</button>
-      <button data-p="words">Words</button>
-      <button data-p="plan">Plan &amp; storage</button>
-      <button data-p="account">Account</button>
-      <button data-p="admin" id="settabadmin" hidden>Admin</button>
+      <button data-p="voice" class="on" data-t="Voice">Voice</button>
+      <button data-p="reading" data-t="Reading">Reading</button>
+      <button data-p="words" data-t="Words">Words</button>
+      <button data-p="plan" data-t="Plan &amp; storage">Plan &amp; storage</button>
+      <button data-p="account" data-t="Account">Account</button>
+      <button data-p="admin" id="settabadmin" hidden data-t="Admin">Admin</button>
     </nav>
 
     <div class="setpanel on" data-p="voice">
       <div id="conns"></div>
-      <div style="margin-top:14px"><button class="btn quiet" id="addconn" type="button">＋ Add a voice server</button></div>
+      <div style="margin-top:14px"><button class="btn quiet" id="addconn" type="button" data-t="＋ Add a voice server">＋ Add a voice server</button></div>
       <div class="addpanel" id="connform" hidden>
-        <label>Kind of server</label>
+        <label data-t="Kind of server">Kind of server</label>
         <select id="cprovider"></select>
-        <label>Label</label>
-        <input id="clabel" placeholder="e.g. Tower Kokoro" autocomplete="off">
-        <label id="csharerow" style="display:flex;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="cshare" style="width:auto"> Share with everyone (household)</label>
+        <label data-t="Label">Label</label>
+        <input id="clabel" placeholder="e.g. Tower Kokoro" data-t-ph="e.g. Tower Kokoro" autocomplete="off">
+        <label id="csharerow" style="display:flex;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="cshare" style="width:auto"> <span data-t="Share with everyone (household)">Share with everyone (household)</span></label>
         <div id="cfields"></div>
         <div style="display:flex;gap:8px;margin-top:16px">
-          <button class="btn" id="csave" type="button">Save server</button>
-          <button class="btn quiet" id="ccancel" type="button">Cancel</button>
+          <button class="btn" id="csave" type="button" data-t="Save server">Save server</button>
+          <button class="btn quiet" id="ccancel" type="button" data-t="Cancel">Cancel</button>
         </div>
       </div>
-      <h3 style="margin-top:30px">Default voice</h3>
-      <p class="sub">The voice a new conversion starts on, and the voice the sandbox opens on. A book already voiced keeps the voice it has until you convert it again.</p>
-      <label>Server</label>
+      <h3 style="margin-top:30px" data-t="Default voice">Default voice</h3>
+      <p class="sub" data-t="The voice a new conversion starts on, and the voice the sandbox opens on. A book already voiced keeps the voice it has until you convert it again.">The voice a new conversion starts on, and the voice the sandbox opens on. A book already voiced keeps the voice it has until you convert it again.</p>
+      <label data-t="Server">Server</label>
       <select id="dconn"></select>
-      <label>Voice</label>
-      <input id="vfilter" placeholder="filter, e.g. en-US or Jenny" autocomplete="off">
-      <select id="voice"><option value="">load voices…</option></select>
+      <label data-t="Voice">Voice</label>
+      <input id="vfilter" placeholder="filter, e.g. en-US or Jenny" data-t-ph="filter, e.g. en-US or Jenny" autocomplete="off">
+      <select id="voice"><option value="" data-t="load voices…">load voices…</option></select>
       <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="btn quiet" id="loadvoices" type="button">Load voices</button>
-        <button class="btn" id="save" type="button">Save</button>
+        <button class="btn quiet" id="loadvoices" type="button" data-t="Load voices">Load voices</button>
+        <button class="btn" id="save" type="button" data-t="Save">Save</button>
       </div>
       <div id="srcpanel" style="display:none">
-        <label>Text sources</label>
-        <p class="hint" style="margin-top:0">Each source asks for what it needs (AO3 asks for a cookie). These live on the server, never in this browser.</p>
+        <label data-t="Text sources">Text sources</label>
+        <p class="hint" style="margin-top:0" data-t="Each source asks for what it needs (AO3 asks for a cookie). These live on the server, never in this browser.">Each source asks for what it needs (AO3 asks for a cookie). These live on the server, never in this browser.</p>
         <div id="sources"></div>
       </div>
     </div>
 
     <div class="setpanel" data-p="reading">
-      <h3 style="margin-top:24px">Reading along</h3>
-      <p class="sub">While a chapter plays, the page marks the sentence being read and can follow it down the page. Timing is estimated from how long the chapter takes to say, so a long pause or a scene break can put it a sentence off. It never changes the audio.</p>
-      <div class="rdopt"><input type="checkbox" id="rdhighlight"><label for="rdhighlight">Highlight the sentence being read</label></div>
-      <div class="rdopt"><input type="checkbox" id="rdscroll"><label for="rdscroll">Scroll the page to follow it</label></div>
-      <label for="rdmode">Where it scrolls to</label>
+      <h3 style="margin-top:24px" data-t="Reading along">Reading along</h3>
+      <p class="sub" data-t="While a chapter plays, the page marks the sentence being read and can follow it down the page. Timing is estimated from how long the chapter takes to say, so a long pause or a scene break can put it a sentence off. It never changes the audio.">While a chapter plays, the page marks the sentence being read and can follow it down the page. Timing is estimated from how long the chapter takes to say, so a long pause or a scene break can put it a sentence off. It never changes the audio.</p>
+      <div class="rdopt"><input type="checkbox" id="rdhighlight"><label for="rdhighlight" data-t="Highlight the sentence being read">Highlight the sentence being read</label></div>
+      <div class="rdopt"><input type="checkbox" id="rdscroll"><label for="rdscroll" data-t="Scroll the page to follow it">Scroll the page to follow it</label></div>
+      <label for="rdmode" data-t="Where it scrolls to">Where it scrolls to</label>
       <select id="rdmode" style="max-width:360px">
-        <option value="follow">Follow along: only when the sentence leaves the screen</option>
-        <option value="center">Always keep it near the middle of the screen</option>
+        <option value="follow" data-t="Follow along: only when the sentence leaves the screen">Follow along: only when the sentence leaves the screen</option>
+        <option value="center" data-t="Always keep it near the middle of the screen">Always keep it near the middle of the screen</option>
       </select>
-      <p class="hint" id="rdnote">Saved to your account, so it follows you to the phone.</p>
+      <p class="hint" id="rdnote" data-t="Saved to your account, so it follows you to the phone.">Saved to your account, so it follows you to the phone.</p>
     </div>
 
     <div class="setpanel" data-p="words">
-      <h3 style="margin-top:24px">Pronunciations</h3>
-      <p class="sub">Words and symbols the voice says wrong. Left: exactly what appears in the text. Right: how it should sound, spelled out (Qui-Gon → Kwai-Gon, ʛ → galleon). Works when the symbol is glued to a number too: 50ʛ and ʛ50,000 both read right.</p>
-      <p class="sub" style="margin-top:4px">Scope: all books, one author, or one book. A writer's own money glyphs usually belong to the author; a single story's belong to the book. The same word in a narrower scope wins.</p>
-      <p class="sub" style="margin-top:4px">Numbers written with commas (50,000) are read as words (fifty thousand) automatically. A plain 1999 or Chapter 12 is left as the author wrote it.</p>
+      <h3 style="margin-top:24px" data-t="Pronunciations">Pronunciations</h3>
+      <p class="sub" data-t="Words and symbols the voice says wrong. Left: exactly what appears in the text. Right: how it should sound, spelled out (Qui-Gon → Kwai-Gon, ʛ → galleon). Works when the symbol is glued to a number too: 50ʛ and ʛ50,000 both read right.">Words and symbols the voice says wrong. Left: exactly what appears in the text. Right: how it should sound, spelled out (Qui-Gon → Kwai-Gon, ʛ → galleon). Works when the symbol is glued to a number too: 50ʛ and ʛ50,000 both read right.</p>
+      <p class="sub" style="margin-top:4px" data-t="Scope: all books, one author, or one book. A writer&#x27;s own money glyphs usually belong to the author; a single story&#x27;s belong to the book. The same word in a narrower scope wins.">Scope: all books, one author, or one book. A writer's own money glyphs usually belong to the author; a single story's belong to the book. The same word in a narrower scope wins.</p>
+      <p class="sub" style="margin-top:4px" data-t="Numbers written with commas (50,000) are read as words (fifty thousand) automatically. A plain 1999 or Chapter 12 is left as the author wrote it.">Numbers written with commas (50,000) are read as words (fifty thousand) automatically. A plain 1999 or Chapter 12 is left as the author wrote it.</p>
       <div id="pronrows"></div>
       <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="btn quiet" id="pronadd" type="button">＋ Add a word</button>
-        <button class="btn" id="pronsave" type="button">Save</button>
+        <button class="btn quiet" id="pronadd" type="button" data-t="＋ Add a word">＋ Add a word</button>
+        <button class="btn" id="pronsave" type="button" data-t="Save">Save</button>
       </div>
       <div id="pronmsg" class="sub" style="margin-top:8px"></div>
     </div>
 
     <div class="setpanel" data-p="plan">
-      <h3 style="margin-top:24px">Characters</h3>
-      <p class="sub">A metered voice charges by the character. Voices you connect yourself are not metered and do not touch this number.</p>
-      <div id="creditsbox" class="small" style="margin-top:8px">Checking your character balance…</div>
+      <h3 style="margin-top:24px" data-t="Characters">Characters</h3>
+      <p class="sub" data-t="A metered voice charges by the character. Voices you connect yourself are not metered and do not touch this number.">A metered voice charges by the character. Voices you connect yourself are not metered and do not touch this number.</p>
+      <div id="creditsbox" class="small" style="margin-top:8px" data-t="Checking your character balance…">Checking your character balance…</div>
       <div id="creditsrate" class="sub" style="margin-top:6px"></div>
       <div id="creditsbuy" style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap"></div>
       <div id="creditsmsg" class="sub" style="margin-top:8px"></div>
-      <h3 style="margin-top:24px">Plan &amp; storage</h3>
-      <p class="sub">Your tier sets how much you can keep. Storage counts once per book you hold; delete a book and its bytes come back.</p>
-      <div id="planusage" class="small" style="margin-top:8px">loading…</div>
+      <h3 style="margin-top:24px" data-t="Plan &amp; storage">Plan &amp; storage</h3>
+      <p class="sub" data-t="Your tier sets how much you can keep. Storage counts once per book you hold; delete a book and its bytes come back.">Your tier sets how much you can keep. Storage counts once per book you hold; delete a book and its bytes come back.</p>
+      <div id="planusage" class="small" style="margin-top:8px" data-t="loading…">loading…</div>
       <div class="prog" id="planbar" style="margin-top:6px;display:none"><i id="planbarfill"></i></div>
       <div id="plancards" style="margin-top:14px;display:flex;gap:12px;flex-wrap:wrap"></div>
       <div id="planblocks" style="margin-top:14px"></div>
       <div id="planmsg" class="sub" style="margin-top:8px"></div>
-      <div style="margin-top:14px"><button class="btn" id="gotoplans" type="button">Compare plans and buy →</button></div>
+      <div style="margin-top:14px"><button class="btn" id="gotoplans" type="button" data-t="Compare plans and buy →">Compare plans and buy →</button></div>
     </div>
 
     <div class="setpanel" data-p="account">
-      <h3 style="margin-top:24px">Password</h3>
-      <p class="sub" id="pwsub">The password you sign in with.</p>
+      <h3 style="margin-top:24px" data-t="Language">Language</h3>
+      <p class="sub" data-t="The app's own words. Books stay in the language they were written in.">The app's own words. Books stay in the language they were written in.</p>
+      <label for="langsel" data-t="Interface language">Interface language</label>
+      <select id="langsel" style="max-width:320px"></select>
+      <h3 style="margin-top:24px" data-t="Password">Password</h3>
+      <p class="sub" id="pwsub" data-t="The password you sign in with.">The password you sign in with.</p>
       <div id="pwcurrentrow">
-        <label for="pwcurrent">Current password</label>
+        <label for="pwcurrent" data-t="Current password">Current password</label>
         <input type="password" id="pwcurrent" autocomplete="current-password" style="max-width:320px">
       </div>
       <div id="pwuserrow" hidden>
-        <label for="pwusername">Sign-in name</label>
+        <label for="pwusername" data-t="Sign-in name">Sign-in name</label>
         <input type="text" id="pwusername" autocomplete="username" style="max-width:320px"
-               placeholder="e.g. cat">
-        <p class="hint" style="margin-top:2px">Your password signs in with this name. Letters, digits, dot, dash or underscore.</p>
+               placeholder="e.g. cat" data-t-ph="e.g. cat">
+        <p class="hint" style="margin-top:2px" data-t="Your password signs in with this name. Letters, digits, dot, dash or underscore.">Your password signs in with this name. Letters, digits, dot, dash or underscore.</p>
       </div>
-      <label for="pwnew">New password</label>
+      <label for="pwnew" data-t="New password">New password</label>
       <input type="password" id="pwnew" autocomplete="new-password" style="max-width:320px">
-      <label for="pwnew2">New password again</label>
+      <label for="pwnew2" data-t="New password again">New password again</label>
       <input type="password" id="pwnew2" autocomplete="new-password" style="max-width:320px">
       <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="btn" id="pwsave" type="button">Save password</button>
+        <button class="btn" id="pwsave" type="button" data-t="Save password">Save password</button>
       </div>
       <div id="pwmsg" class="sub" style="margin-top:8px"></div>
-      <h3 style="margin-top:30px">Connected accounts</h3>
-      <p class="sub">Sign in with Google, GitHub, Microsoft or SimpleLogin instead of a password. Link one here while you are signed in.</p>
+      <h3 style="margin-top:30px" data-t="Connected accounts">Connected accounts</h3>
+      <p class="sub" data-t="Sign in with Google, GitHub, Microsoft or SimpleLogin instead of a password. Link one here while you are signed in.">Sign in with Google, GitHub, Microsoft or SimpleLogin instead of a password. Link one here while you are signed in.</p>
       <div id="oauthrows"></div>
-      <h3 style="margin-top:30px">Devices &amp; sessions</h3>
-      <p class="sub">Everywhere this account is signed in. Log out a device you do not recognise.</p>
+      <h3 style="margin-top:30px" data-t="Devices &amp; sessions">Devices &amp; sessions</h3>
+      <p class="sub" data-t="Everywhere this account is signed in. Log out a device you do not recognise.">Everywhere this account is signed in. Log out a device you do not recognise.</p>
       <div id="sessionrows"></div>
       <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="btn quiet" id="sessothers" type="button">Log out other devices</button>
-        <button class="btn" id="sessall" type="button">Log out everywhere</button>
+        <button class="btn quiet" id="sessothers" type="button" data-t="Log out other devices">Log out other devices</button>
+        <button class="btn" id="sessall" type="button" data-t="Log out everywhere">Log out everywhere</button>
       </div>
       <div id="sessmsg" class="sub" style="margin-top:8px"></div>
-      <h3 style="margin-top:30px">Privacy &amp; terms</h3>
+      <h3 style="margin-top:30px" data-t="Privacy &amp; terms">Privacy &amp; terms</h3>
       <p class="sub">What we collect, who we share it with, and how to ask us to delete your
-        account. <a href="/privacy" target="_blank" rel="noopener">Read the privacy policy →</a>
+        account. <a href="/privacy" target="_blank" rel="noopener" data-t="Read the privacy policy →">Read the privacy policy →</a>
         The rules for using the service are in the
-        <a href="/terms" target="_blank" rel="noopener">terms of service →</a></p>
-      <h3 style="margin-top:30px">Delete account</h3>
+        <a href="/terms" target="_blank" rel="noopener" data-t="terms of service →">terms of service →</a></p>
+      <h3 style="margin-top:30px" data-t="Delete account">Delete account</h3>
       <p class="sub">Erases your account and everything in it: every book, the audio we voiced
         for you, your listening history, and every way of signing in. This cannot be undone.
-        <a href="/delete-account" target="_blank" rel="noopener">What gets deleted →</a></p>
+        <a href="/delete-account" target="_blank" rel="noopener" data-t="What gets deleted →">What gets deleted →</a></p>
       <div id="delpwrow" style="margin-top:10px">
-        <input type="password" id="delpw" placeholder="Your password"
+        <input type="password" id="delpw" placeholder="Your password" data-t-ph="Your password"
                autocomplete="current-password" style="max-width:320px">
       </div>
       <div id="delconfrow" style="margin-top:10px" hidden>
-        <input type="text" id="delconf" placeholder="type: delete my account"
+        <input type="text" id="delconf" placeholder="type: delete my account" data-t-ph="type: delete my account"
                autocomplete="off" style="max-width:320px">
       </div>
       <div style="margin-top:10px">
-        <button class="btn" id="delbtn" type="button">Delete my account</button>
+        <button class="btn" id="delbtn" type="button" data-t="Delete my account">Delete my account</button>
       </div>
       <div id="delmsg" class="sub" style="margin-top:8px"></div>
     </div>
 
     <div class="setpanel" data-p="admin">
       <div id="adminwrap" style="display:none">
-        <h3 style="margin-top:24px">All sessions (admin)</h3>
-        <p class="sub">Every device signed in to this server. You can boot any of them.</p>
+        <h3 style="margin-top:24px" data-t="All sessions (admin)">All sessions (admin)</h3>
+        <p class="sub" data-t="Every device signed in to this server. You can boot any of them.">Every device signed in to this server. You can boot any of them.</p>
         <div id="adminsessions"></div>
         <div style="display:flex;gap:8px;margin-top:10px">
-          <button class="btn" id="sessallusers" type="button">Sign out everyone</button>
+          <button class="btn" id="sessallusers" type="button" data-t="Sign out everyone">Sign out everyone</button>
         </div>
-        <h3 style="margin-top:30px">Users (admin)</h3>
-        <p class="sub">Lift the storage or character check for one account. Usage is still counted and shown; this only stops the refusal.</p>
+        <h3 style="margin-top:30px" data-t="Users (admin)">Users (admin)</h3>
+        <p class="sub" data-t="Lift the storage or character check for one account. Usage is still counted and shown; this only stops the refusal.">Lift the storage or character check for one account. Usage is still counted and shown; this only stops the refusal.</p>
         <div id="admingrants"></div>
         <div id="grantmsg" class="sub" style="margin-top:8px"></div>
-        <h3 style="margin-top:30px">Plans (admin)</h3>
-        <p class="sub">Set an account's tier without a payment (a comp for family or a tester). Allowance and usage follow the tier.</p>
+        <h3 style="margin-top:30px" data-t="Plans (admin)">Plans (admin)</h3>
+        <p class="sub" data-t="Set an account&#x27;s tier without a payment (a comp for family or a tester). Allowance and usage follow the tier.">Set an account's tier without a payment (a comp for family or a tester). Allowance and usage follow the tier.</p>
         <div id="adminplans"></div>
         <div id="planadminmsg" class="sub" style="margin-top:8px"></div>
-        <h3 style="margin-top:30px">Sign-ups (admin)</h3>
-        <p class="sub">Whether a stranger can make their own account on the buy page. Closed, only you can make accounts.</p>
-        <label style="display:flex;align-items:center;gap:8px;margin-top:8px"><input type="checkbox" id="regopen" style="width:auto"> Open sign-ups</label>
+        <h3 style="margin-top:30px" data-t="Sign-ups (admin)">Sign-ups (admin)</h3>
+        <p class="sub" data-t="Whether a stranger can make their own account on the buy page. Closed, only you can make accounts.">Whether a stranger can make their own account on the buy page. Closed, only you can make accounts.</p>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px"><input type="checkbox" id="regopen" style="width:auto"> <span data-t="Open sign-ups">Open sign-ups</span></label>
         <div id="regmsg" class="sub" style="margin-top:8px"></div>
       </div>
     </div>
@@ -652,32 +656,32 @@
 
   <!-- plans: a page for buying the platform, said plainly -------------------- -->
   <section class="view" id="v-plans">
-    <h2>Get fireside</h2>
-    <p class="sub">The reader is free to try. A plan buys the platform, and the platform is only half the story.</p>
-    <p class="sub" id="pagesignupline" style="margin-top:10px">New here? <button class="btn quiet" id="pagesignup" type="button">Create a free account</button> No card needed.</p>
+    <h2 data-t="Get fireside">Get fireside</h2>
+    <p class="sub" data-t="The reader is free to try. A plan buys the platform, and the platform is only half the story.">The reader is free to try. A plan buys the platform, and the platform is only half the story.</p>
+    <p class="sub" id="pagesignupline" style="margin-top:10px">New here? <button class="btn quiet" id="pagesignup" type="button" data-t="Create a free account">Create a free account</button> No card needed.</p>
 
     <div class="addpanel" style="margin-top:16px;border-color:var(--flame)">
-      <div style="font-weight:600">Read this before you buy</div>
-      <p class="sub" style="margin:8px 0 0">A subscription buys <b>the platform</b>: this server, the reader app, your storage, and updates. It does <b>not</b> include a voice.</p>
-      <p class="sub" style="margin:8px 0 0">The voice is what actually reads to you, and it comes from a speech provider you connect yourself (your own Azure Speech key, or a server a friend shares with you). <b>Without a voice provider the platform has nothing to read with</b>, so a subscription on its own is close to worthless.</p>
-      <p class="sub" style="margin:8px 0 0">Buy the platform only if you already have a voice provider, or you are about to add one. If you have neither, stay on the free plan and connect a voice first.</p>
+      <div style="font-weight:600" data-t="Read this before you buy">Read this before you buy</div>
+      <p class="sub" style="margin:8px 0 0">A subscription buys <b data-t="the platform">the platform</b>: this server, the reader app, your storage, and updates. It does <b data-t="not">not</b> include a voice.</p>
+      <p class="sub" style="margin:8px 0 0">The voice is what actually reads to you, and it comes from a speech provider you connect yourself (your own Azure Speech key, or a server a friend shares with you). <b data-t="Without a voice provider the platform has nothing to read with">Without a voice provider the platform has nothing to read with</b>, so a subscription on its own is close to worthless.</p>
+      <p class="sub" style="margin:8px 0 0" data-t="Buy the platform only if you already have a voice provider, or you are about to add one. If you have neither, stay on the free plan and connect a voice first.">Buy the platform only if you already have a voice provider, or you are about to add one. If you have neither, stay on the free plan and connect a voice first.</p>
     </div>
 
-    <h3 style="margin-top:28px">The plans</h3>
+    <h3 style="margin-top:28px" data-t="The plans">The plans</h3>
     <div id="pageplans" style="margin-top:14px;display:flex;gap:14px;flex-wrap:wrap"></div>
-    <p class="sub" style="margin-top:12px">No plan includes a voice provider. That part is always yours to plug in.</p>
+    <p class="sub" style="margin-top:12px" data-t="No plan includes a voice provider. That part is always yours to plug in.">No plan includes a voice provider. That part is always yours to plug in.</p>
 
-    <h3 style="margin-top:28px">Storage blocks</h3>
+    <h3 style="margin-top:28px" data-t="Storage blocks">Storage blocks</h3>
     <div id="pageblocks" style="margin-top:12px"></div>
 
-    <h3 style="margin-top:28px">Your cart</h3>
+    <h3 style="margin-top:28px" data-t="Your cart">Your cart</h3>
     <div class="addpanel" style="margin-top:10px">
-      <div id="pagecart" class="small">Nothing in the cart yet.</div>
+      <div id="pagecart" class="small" data-t="Nothing in the cart yet.">Nothing in the cart yet.</div>
       <div id="pagetotal" class="small" style="margin-top:10px;font-weight:600"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center">
-        <button class="btn" id="pagebuy" type="button">Purchase</button>
-        <button class="btn quiet" id="pageclearcart" type="button">Empty cart</button>
-        <button class="btn quiet" id="pagesignin" type="button" style="display:none">Sign in or create an account</button>
+        <button class="btn" id="pagebuy" type="button" data-t="Purchase">Purchase</button>
+        <button class="btn quiet" id="pageclearcart" type="button" data-t="Empty cart">Empty cart</button>
+        <button class="btn quiet" id="pagesignin" type="button" style="display:none" data-t="Sign in or create an account">Sign in or create an account</button>
       </div>
     </div>
 
@@ -687,120 +691,122 @@
   <div class="err" id="err"></div>
   <audio id="audio" preload="metadata"></audio>
 </main>
-<div id="ribbon" class=""><span class="spin" id="rspin" style="display:none"></span><span class="rtext" id="rtext"></span><span class="rtime" id="rtime"></span><span class="rprog" id="rprog"><i id="rprogfill"></i></span><button class="rbtn" id="rcancel" type="button" hidden>Cancel</button><button class="rbtn" id="rdismiss" type="button" hidden>Dismiss</button></div>
+<div id="ribbon" class=""><span class="spin" id="rspin" style="display:none"></span><span class="rtext" id="rtext"></span><span class="rtime" id="rtime"></span><span class="rprog" id="rprog"><i id="rprogfill"></i></span><button class="rbtn" id="rcancel" type="button" hidden data-t="Cancel">Cancel</button><button class="rbtn" id="rdismiss" type="button" hidden data-t="Dismiss">Dismiss</button></div>
 <div id="toasts"></div>
-<button id="selplay" type="button" hidden style="position:fixed;z-index:60;padding:8px 14px;border-radius:999px;border:1px solid #3a3f47;background:#191c22;color:#eceff3;font:inherit;font-size:13px;box-shadow:0 8px 22px rgba(0,0,0,.45);cursor:pointer">▶ Play from here</button>
+<button id="selplay" type="button" hidden style="position:fixed;z-index:60;padding:8px 14px;border-radius:999px;border:1px solid #3a3f47;background:#191c22;color:#eceff3;font:inherit;font-size:13px;box-shadow:0 8px 22px rgba(0,0,0,.45);cursor:pointer" data-t="▶ Play from here">▶ Play from here</button>
 <div id="transport">
-  <button class="tnav" id="tprev" type="button" title="Previous chapter" aria-label="Previous chapter">⏮</button>
-  <button class="tnav" id="tback" type="button" title="Back 15 seconds">−15s</button>
-  <button class="tplay" id="tplay" type="button" aria-label="Play">▶</button>
-  <button class="tnav" id="tfwd" type="button" title="Forward 15 seconds">+15s</button>
-  <button class="tnav" id="tnext" type="button" title="Next chapter" aria-label="Next chapter">⏭</button>
-  <button class="tq" id="tqueue" type="button" title="Queue" aria-label="Queue">☰</button>
+  <button class="tnav" id="tprev" type="button" title="Previous chapter" data-t-title="Previous chapter" data-t-title="Previous chapter" data-t-title="Previous chapter" aria-label="Previous chapter" data-t-aria="Previous chapter">⏮</button>
+  <button class="tnav" id="tback" type="button" title="Back 15 seconds" data-t-title="Back 15 seconds" data-t-title="Back 15 seconds" data-t-title="Back 15 seconds">−15s</button>
+  <button class="tplay" id="tplay" type="button" aria-label="Play" data-t-aria="Play">▶</button>
+  <button class="tnav" id="tfwd" type="button" title="Forward 15 seconds" data-t-title="Forward 15 seconds" data-t-title="Forward 15 seconds" data-t-title="Forward 15 seconds">+15s</button>
+  <button class="tnav" id="tnext" type="button" title="Next chapter" data-t-title="Next chapter" data-t-title="Next chapter" data-t-title="Next chapter" aria-label="Next chapter" data-t-aria="Next chapter">⏭</button>
+  <button class="tq" id="tqueue" type="button" title="Queue" data-t-title="Queue" data-t-title="Queue" data-t-title="Queue" aria-label="Queue" data-t-aria="Queue">☰</button>
   <span class="tnow" id="tnowbook"></span>
   <span class="ttime" id="ttimes"></span>
-  <label class="vol" title="Volume">Vol<input id="tvol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></label>
+  <label class="vol" title="Volume" data-t-title="Volume" data-t-title="Volume" data-t-title="Volume">Vol<input id="tvol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" data-t-aria="Volume"></label>
 </div>
 <div id="queuedrawer" hidden>
-  <div class="qh"><h3>Queue</h3><button class="x" id="qclose" type="button" aria-label="Close">×</button></div>
-  <p class="small" id="qempty">The queue is empty. Open a book and press ＋ Queue to add it. When a book finishes, the next one plays.</p>
+  <div class="qh"><h3 data-t="Queue">Queue</h3><button class="x" id="qclose" type="button" aria-label="Close" data-t-aria="Close">×</button></div>
+  <p class="small" id="qempty" data-t="The queue is empty. Open a book and press ＋ Queue to add it. When a book finishes, the next one plays.">The queue is empty. Open a book and press ＋ Queue to add it. When a book finishes, the next one plays.</p>
   <div id="qlist" class="qlist"></div>
   <div class="connrow">
-    <button class="btn quiet" id="qplay" type="button">Play queue</button>
-    <button class="btn quiet" id="qclear" type="button">Clear queue</button>
+    <button class="btn quiet" id="qplay" type="button" data-t="Play queue">Play queue</button>
+    <button class="btn quiet" id="qclear" type="button" data-t="Clear queue">Clear queue</button>
   </div>
 </div>
 <div class="modal" id="convertdlg" hidden>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="Convert to voice">
-    <h3>Convert to voice</h3>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Convert to voice" data-t-aria="Convert to voice">
+    <h3 data-t="Convert to voice">Convert to voice</h3>
     <p class="small" id="cvcount" style="margin-top:6px"></p>
     <p class="small" id="cvest" style="margin-top:2px;color:#9aa"></p>
-    <label>Voice server</label>
+    <label data-t="Voice server">Voice server</label>
     <select id="cvconn"></select>
-    <label>Voice</label>
-    <input id="cvfilter" placeholder="filter, e.g. en-US or Heart" autocomplete="off">
-    <select id="cvvoice"><option value="">load voices…</option></select>
+    <label data-t="Voice">Voice</label>
+    <input id="cvfilter" placeholder="filter, e.g. en-US or Heart" data-t-ph="filter, e.g. en-US or Heart" autocomplete="off">
+    <select id="cvvoice"><option value="" data-t="load voices…">load voices…</option></select>
     <p class="small" id="cvvoiceinfo" style="margin-top:6px"></p>
-    <label>Chapters</label>
+    <label data-t="Chapters">Chapters</label>
     <div id="cvlist" class="chaplist" style="max-height:170px"></div>
     <div class="connrow">
-      <button class="btn quiet" id="cvcancel" type="button">Cancel</button>
-      <button class="btn quiet" id="cvsel" type="button">Convert selected</button>
-      <button class="btn" id="cvall" type="button">Convert all</button>
+      <button class="btn quiet" id="cvcancel" type="button" data-t="Cancel">Cancel</button>
+      <button class="btn quiet" id="cvsel" type="button" data-t="Convert selected">Convert selected</button>
+      <button class="btn" id="cvall" type="button" data-t="Convert all">Convert all</button>
     </div>
   </div>
 </div>
 
 <div class="modal" id="pronimpactdlg" hidden>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="Pronunciation changes need new audio">
-    <h3>Some audio now needs re-encoding</h3>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Pronunciation changes need new audio" data-t-aria="Pronunciation changes need new audio">
+    <h3 data-t="Some audio now needs re-encoding">Some audio now needs re-encoding</h3>
     <p class="sub" id="pimsg" style="margin-top:6px"></p>
     <div id="pilist" style="margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
     <div class="connrow">
-      <button class="btn quiet" id="pilater" type="button">Later</button>
-      <button class="btn" id="pigo" type="button">Re-encode only these</button>
+      <button class="btn quiet" id="pilater" type="button" data-t="Later">Later</button>
+      <button class="btn" id="pigo" type="button" data-t="Re-encode only these">Re-encode only these</button>
     </div>
   </div>
 </div>
 
 <div class="modal" id="settingsdlg" hidden>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="Book settings">
-    <h3>Book settings</h3>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Book settings" data-t-aria="Book settings">
+    <h3 data-t="Book settings">Book settings</h3>
     <p class="small" id="stitle"></p>
-    <label>Title</label>
+    <label data-t="Title">Title</label>
     <div class="setrow">
-      <input type="text" id="stitlein" autocomplete="off" placeholder="Book title">
-      <button class="btn quiet" id="seditbtn" type="button" hidden>Edit</button>
-      <button class="btn quiet" id="ssavemeta" type="button">Save</button>
+      <input type="text" id="stitlein" autocomplete="off" placeholder="Book title" data-t-ph="Book title">
+      <button class="btn quiet" id="seditbtn" type="button" hidden data-t="Edit">Edit</button>
+      <button class="btn quiet" id="ssavemeta" type="button" data-t="Save">Save</button>
     </div>
-    <label>Author</label>
+    <label data-t="Author">Author</label>
     <div class="setrow">
-      <input type="text" id="sauthorin" autocomplete="off" placeholder="Who wrote it">
+      <input type="text" id="sauthorin" autocomplete="off" placeholder="Who wrote it" data-t-ph="Who wrote it">
     </div>
     <p class="small" id="smetanote" style="margin-top:6px" hidden></p>
-    <label>ISBN</label>
+    <label data-t="ISBN">ISBN</label>
     <div class="setrow">
       <input type="text" id="sisbn" placeholder="978…" autocomplete="off" inputmode="numeric">
-      <button class="btn quiet" id="sfetch" type="button">Fetch details</button>
+      <button class="btn quiet" id="sfetch" type="button" data-t="Fetch details">Fetch details</button>
     </div>
     <p class="small" id="snote" style="margin-top:6px"></p>
     <div id="smeta" class="smeta" hidden></div>
-    <label style="margin-top:14px">Series</label>
+    <label style="margin-top:14px" data-t="Series">Series</label>
     <div class="setrow">
       <select id="sseries"></select>
     </div>
     <div class="setrow" id="sseriesord" hidden>
-      <button class="btn quiet" id="sseriesup" type="button" aria-label="Move earlier">↑</button>
-      <button class="btn quiet" id="sseriesdn" type="button" aria-label="Move later">↓</button>
+      <button class="btn quiet" id="sseriesup" type="button" aria-label="Move earlier" data-t-aria="Move earlier">↑</button>
+      <button class="btn quiet" id="sseriesdn" type="button" aria-label="Move later" data-t-aria="Move later">↓</button>
       <span class="small" id="sseriespos"></span>
     </div>
     <p class="small" id="sseriesnote" style="margin-top:6px" hidden></p>
-    <label style="margin-top:14px">Cover</label>
+    <label style="margin-top:14px" data-t="Cover">Cover</label>
     <div class="coverprev" id="scovprev"></div>
     <div class="setrow">
-      <input type="url" id="scovurl" placeholder="Paste an image URL" autocomplete="off">
-      <button class="btn quiet" id="scovurlbtn" type="button">Use URL</button>
+      <input type="url" id="scovurl" placeholder="Paste an image URL" data-t-ph="Paste an image URL" autocomplete="off">
+      <button class="btn quiet" id="scovurlbtn" type="button" data-t="Use URL">Use URL</button>
     </div>
     <div class="setrow">
-      <button class="btn quiet" id="scovfilebtn" type="button">Upload a file…</button>
-      <button class="btn quiet" id="scovautobtn" type="button" hidden>Find by ISBN</button>
-      <button class="btn quiet" id="scovrmbtn" type="button" hidden>Remove</button>
+      <button class="btn quiet" id="scovfilebtn" type="button" data-t="Upload a file…">Upload a file…</button>
+      <button class="btn quiet" id="scovautobtn" type="button" hidden data-t="Find by ISBN">Find by ISBN</button>
+      <button class="btn quiet" id="scovrmbtn" type="button" hidden data-t="Remove">Remove</button>
       <input type="file" id="scovfile" accept="image/*" hidden>
     </div>
-    <label style="margin-top:16px">Reading copies</label>
+    <label style="margin-top:16px" data-t="Reading copies">Reading copies</label>
     <p class="small" id="scopiesnote"></p>
     <div id="scopies"></div>
     <div class="setrow" id="scopiesall" hidden>
-      <button class="btn quiet" id="srmallbtn" type="button">Remove all voices</button>
+      <button class="btn quiet" id="srmallbtn" type="button" data-t="Remove all voices">Remove all voices</button>
     </div>
-    <label style="margin-top:16px">Delete</label>
+    <label style="margin-top:16px" data-t="Delete">Delete</label>
     <div class="setrow">
-      <button class="btn quiet" id="sdelbookbtn" type="button">Remove this book from my library</button>
+      <button class="btn quiet" id="sdelbookbtn" type="button" data-t="Remove this book from my library">Remove this book from my library</button>
     </div>
-    <div class="connrow" style="margin-top:16px"><button class="btn" id="scovdone" type="button">Done</button></div>
+    <div class="connrow" style="margin-top:16px"><button class="btn" id="scovdone" type="button" data-t="Done">Done</button></div>
   </div>
 </div>
 
+<script>/* translate the static shell before the app script runs; anything the app draws itself uses T() */
+if (window.FS_I18N) FS_I18N.apply(document);</script>
 <script>
 const $ = s => document.querySelector(s);
 const UKEY = 'fireside.user', SKEY = 'fireside.settings', SETTAB_KEY = 'fireside.settab', LKEY = 'fireside.lastbook', DEVICE = 'web-' + Math.random().toString(36).slice(2, 8);
@@ -1005,6 +1011,19 @@ function setSetTab(p) {
   if (p === 'plan') loadCredits();
 }
 if ($('#settabs')) document.querySelectorAll('#settabs button').forEach(b => b.onclick = () => setSetTab(b.dataset.p));
+/* Language: the list comes from the server (one JSON catalog per language in
+   ui/i18n), so adding a translation ships a language and needs no code here.
+   The choice is a cookie because the server has to pick the catalog before it
+   renders, and a page that swaps language after paint flashes the old one. */
+(function () {
+  const sel = $('#langsel'), I = window.FS_I18N;
+  if (!sel || !I) return;
+  const list = (I.locales && I.locales.length) ? I.locales : [{ code: I.locale, name: I.locale }];
+  sel.innerHTML = list.map(l =>
+    '<option value="' + l.code + '"' + (l.code === I.locale ? ' selected' : '') + '>' +
+    (l.dir === 'rtl' ? l.name + ' (RTL)' : l.name) + '</option>').join('');
+  sel.onchange = () => I.setLocale(sel.value);
+})();
 
 // --- settings: voice servers, kept on the server ---------------------------
 // The old model kept the key in this browser. It does not any more: a server
@@ -2915,7 +2934,7 @@ async function loadText(idx) {
       });
     }
     readingTick(true);
-  } catch (e) { readingReset(); $('#nptext').innerHTML = '<p class="small">No text for this chapter.</p>'; }
+  } catch (e) { readingReset(); $('#nptext').innerHTML = '<p class="small" data-t="No text for this chapter.">No text for this chapter.</p>'; }
 }
 
 // --- reading along: mark the sentence being spoken, and follow it -----------
@@ -3150,7 +3169,7 @@ function openConvert() {
 }
 async function loadCvVoices() {
   const vs = $('#cvvoice'), cid = $('#cvconn').value;
-  vs.innerHTML = '<option value="">loading…</option>';
+  vs.innerHTML = '<option value="" data-t="loading…">loading…</option>';
   if (!cid) { vs.innerHTML = '<option value="">—</option>'; return; }
   try {
     const d = await jpost('/voices', { connection_id: cid });
@@ -3160,9 +3179,9 @@ async function loadCvVoices() {
     const cur = ((book && book.chapters.find(c => c.rendered && c.voice)) || {}).voice || '';
     const pick = PREFS.default_voice || cur || localStorage.getItem('fs_lastvoice') || '';
     fillVoices(vs, d.voices || [], pick);
-    if (!vs.options.length) vs.innerHTML = '<option value="">no voices</option>';
+    if (!vs.options.length) vs.innerHTML = '<option value="" data-t="no voices">no voices</option>';
     const f = $('#cvfilter'); if (f) { f.value = ''; filterSel(vs, ''); }
-  } catch (e) { vs.innerHTML = '<option value="">could not load voices</option>'; }
+  } catch (e) { vs.innerHTML = '<option value="" data-t="could not load voices">could not load voices</option>'; }
   cvMarkVoices();
   updateEstimate();
 }
@@ -3867,17 +3886,17 @@ function renderSandboxPicker() {
 
 async function sbLoadVoices() {
   const cid = $('#sbconn').value, sel = $('#sbvoice');
-  if (!cid) { SB_VOICES = []; sel.innerHTML = '<option value="">add a voice server first</option>'; return; }
-  sel.innerHTML = '<option value="">loading…</option>';
+  if (!cid) { SB_VOICES = []; sel.innerHTML = '<option value="" data-t="add a voice server first">add a voice server first</option>'; return; }
+  sel.innerHTML = '<option value="" data-t="loading…">loading…</option>';
   try {
     const d = await jpost('/voices', { connection_id: cid });
     SB_VOICES = d.voices || [];
   } catch (e) {
-    SB_VOICES = []; sel.innerHTML = '<option value="">' + (e.message || 'voices failed') + '</option>'; return;
+    SB_VOICES = []; sel.innerHTML = '<option value="" data-t="' + (e.message || 'voices failed') + '">' + (e.message || 'voices failed') + '</option>'; return;
   }
   sel.innerHTML = '';
   fillVoices(sel, SB_VOICES, PREFS.default_voice || null);   // hear your default first
-  if (!SB_VOICES.length) sel.innerHTML = '<option value="">no voices on this server</option>';
+  if (!SB_VOICES.length) sel.innerHTML = '<option value="" data-t="no voices on this server">no voices on this server</option>';
   else sbStatus(SB_VOICES.length + ' voices.');
 }
 
