@@ -189,6 +189,7 @@
     "Two-factor": "Doble factor",
     "A six-digit code from an authenticator app, on top of your password. Optional, and worth it: your password alone is one stolen line away from a stranger reading your library.": "Un código de seis dígitos de una app de autenticación, además de tu contraseña. Es opcional, y vale la pena: con solo tu contraseña, una línea filtrada basta para que un desconocido lea tu biblioteca.",
     "Set up two-factor": "Activar el doble factor",
+    "Change authenticator": "Cambiar autenticador",
     "New recovery codes": "Códigos de recuperación nuevos",
     "Turn off two-factor": "Desactivar el doble factor",
     "Add this key to your authenticator app, then type the six digits it shows.": "Añade esta clave a tu app de autenticación y luego escribe los seis dígitos que muestra.",

@@ -427,6 +427,7 @@
           <p class="small" id="npkicker"></p>
           <h2 id="nptitle"></h2>
           <p class="small" id="npauthor" style="margin-top:4px" hidden></p>
+          <p class="small" id="npimprint" style="margin-top:2px" hidden></p>
           <p class="sub" id="npdesc" style="margin-top:8px" hidden></p>
           <div id="nptext" style="margin-top:16px"></div>
         </div>
@@ -609,6 +610,7 @@
         <input type="text" id="twofacode" inputmode="numeric" autocomplete="one-time-code"
                placeholder="123456" data-t-ph="123456" style="max-width:160px">
         <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn quiet" id="twofachange" type="button" data-t="Change authenticator">Change authenticator</button>
           <button class="btn quiet" id="twofarecov" type="button" data-t="New recovery codes">New recovery codes</button>
           <button class="btn quiet" id="twofaoffbtn" type="button" data-t="Turn off two-factor">Turn off two-factor</button>
         </div>
@@ -2171,8 +2173,11 @@ function twofaShow(mode, onDone) {
   d.hidden = false;
   setTimeout(() => { try { $('#twofainput').focus(); } catch (_) {} }, 30);
 }
-async function twofaEnrollStart() {
-  const info = await jpost('/2fa/enroll', {});
+// `proof` is the current factor, and it is only needed when one is live: the
+// server refuses to replace a confirmed secret without it, so that a stolen
+// session cannot move the second factor onto its own phone.
+async function twofaEnrollStart(proof) {
+  const info = await jpost('/2fa/enroll', proof || {});
   $('#twofasecret').textContent = (info.secret || '').replace(/(.{4})/g, '$1 ').trim();
   const a = $('#twofauri');
   a.innerHTML = '';
@@ -2234,17 +2239,36 @@ async function loadTwofa() {
   $('#twofaon').hidden = !on;
   $('#twofamessage').textContent = '';
   if (on) {
-    box.textContent = 'On. ' + (st.recovery_left || 0) + ' recovery code(s) left.';
+    box.textContent = 'On. ' + (st.recovery_left || 0) + ' recovery code(s) left.'
+      + (st.required ? ' This server requires it for administrators.' : '');
   } else if (st.required) {
-    box.textContent = 'Required for this account, because it administers the server.';
+    box.textContent = 'Required for this account, because this server requires it for administrators.';
   } else {
     box.textContent = 'Off.';
   }
-  $('#twofaoffbtn').disabled = !!st.required;
-  if (st.required) $('#twofaoffbtn').textContent = 'Required for admins';
+  const offBtn = $('#twofaoffbtn');
+  if (offBtn) {
+    offBtn.disabled = !!st.required;
+    offBtn.textContent = st.required ? 'Required by this server' : 'Turn off two-factor';
+  }
 }
 if ($('#twofastart')) $('#twofastart').onclick = () => {
   twofaEnrollStart().catch(e => { $('#twofamessage').textContent = e.message || 'could not start'; });
+};
+if ($('#twofachange')) $('#twofachange').onclick = async () => {
+  const code = ($('#twofacode').value || '').replace(/[^0-9]/g, '');
+  if (!code) {
+    $('#twofamessage').textContent =
+      'Type the six-digit code from your current app above, then press Change authenticator.';
+    try { $('#twofacode').focus(); } catch (_) {}
+    return;
+  }
+  try {
+    await twofaEnrollStart({ code });
+    $('#twofamessage').textContent = '';
+  } catch (e) {
+    $('#twofamessage').textContent = e.message || 'could not start a new authenticator';
+  }
 };
 if ($('#twofarecov')) $('#twofarecov').onclick = async () => {
   const code = ($('#twofacode').value || '').replace(/[^0-9]/g, '');
@@ -2989,8 +3013,15 @@ function renderPlay() {
   renderVoicePicker();
   drawSpine();
   renderCover();
-  const au = $('#npauthor'), de = $('#npdesc');
+  const au = $('#npauthor'), de = $('#npdesc'), im = $('#npimprint');
   if (au) { au.textContent = book.author || ''; au.hidden = !book.author; }
+  // The edition line: publisher and year, from the same record the settings
+  // panel edits. Composed in the script rather than the markup so an unknown
+  // half does not leave a dangling separator on the page.
+  if (im) {
+    const line = [book.publisher || '', book.published || ''].filter(Boolean).join(' · ');
+    im.textContent = line; im.hidden = !line;
+  }
   if (de) { de.textContent = book.description || ''; de.hidden = !book.description; }
   if (cur < 0) { $('#npkicker').textContent = book.title; $('#nptitle').textContent = 'Choose a chapter'; $('#nptext').innerHTML = ''; updateTransport(); return; }
   const c = book.chapters.find(x => x.idx === cur);

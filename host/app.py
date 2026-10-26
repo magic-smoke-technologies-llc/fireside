@@ -538,10 +538,15 @@ class App:
                              "detail": "the example needs about %d bytes and your "
                                        "plan has no room for it" % incoming}
             bid = library.add_book(self.conn, self.storage, user, book)
-            author = (book.meta or {}).get("author") or ""
-            if author:
-                library.set_details(self.conn, bid, author=author)
+            self._fill_example_details(bid)
+            self._maybe_cover(bid, book)
             made = True
+        else:
+            # A copy added before the bundled record was complete keeps its
+            # blanks. Fill those, and only those: a field the reader typed stays
+            # their text, and a cover they chose stays their cover.
+            if self._fill_example_details(bid):
+                self._maybe_cover(bid, example.book())
         b = library.get_book(self.conn, bid) or {}
         out = {"book_id": bid, "title": b.get("title", ""),
                "chapters": len(library.chapters(self.conn, bid)),
@@ -555,6 +560,20 @@ class App:
             out["render_status"] = st
             out["render"] = r
         return 200, out
+
+    def _fill_example_details(self, book_id):
+        """Write the bundled record onto an example copy, blank fields only.
+
+        Returns True when something was written, so the caller can also put the
+        cover on. Never overwrites a field the reader can edit: the example is a
+        starting point, not an authority over their shelf."""
+        b = library.get_book(self.conn, book_id) or {}
+        fill = {k: v for k, v in example.details().items()
+                if not (b.get(k) or "").strip()}
+        if not fill:
+            return False
+        library.set_details(self.conn, book_id, **fill)
+        return True
 
     @staticmethod
     def _book_bytes(book):
@@ -2199,13 +2218,21 @@ class App:
         return self.door_limiter.allow("2fa:%s:%s" % (kind, uid or "?"))
 
     def twofa_status(self, q, body):
-        """What this session still owes, before the client renders anything."""
+        """What this session still owes, and what it may do about it.
+
+        `required` is the deployment forcing a factor on this account, not "this
+        account is an admin": with FIRESIDE_REQUIRE_2FA off an admin is free to
+        run without one, and the panel should not lie about that."""
         factor, uid = self._twofa_who(q)
+        admin = bool(uid) and auth.is_admin(self.conn, uid)
+        forced = admin and auth.require_admins_on()
         return 200, {
             "twofa": factor if factor in auth.PENDING else "",
             "enrolled": auth.enrolled(self.conn, uid),
             "recovery_left": auth.recovery_code_left(self.conn, uid),
-            "required": bool(uid) and auth.is_admin(self.conn, uid),
+            "required": forced,
+            "admin": admin,
+            "can_disable": bool(uid) and not forced,
         }
 
     def twofa_enroll(self, q, body):
@@ -2213,15 +2240,28 @@ class App:
 
         Starting over is safe and deliberate: begin_enroll replaces the secret
         and un-confirms it, so an interrupted enrolment cannot leave a key
-        behind that nobody scanned.
+        behind that nobody scanned. That is exactly why replacing a CONFIRMED
+        factor asks for the current one first. Without that proof a stolen
+        session could move the second factor onto its own phone, which is the
+        whole thing the factor exists to stop.
         """
         factor, uid = self._twofa_who(q)
         if not uid:
             return 401, {"error": "auth required"}
         if not self._allow_attempt(uid, "enroll"):
             return 429, {"error": "too many attempts"}
-        account = (body or {}).get("account") or self._account_name(uid)
+        b = body or {}
+        changing = auth.enrolled(self.conn, uid)
+        if changing:
+            ok = auth.check_code(self.conn, uid, b.get("code"))
+            if not ok and (b.get("recovery") or "").strip():
+                ok = auth.spend_recovery_code(self.conn, uid, b.get("recovery"))
+            if not ok:
+                return 401, {"error": "enter a current code to change your "
+                                      "authenticator", "needs_proof": True}
+        account = b.get("account") or self._account_name(uid)
         out = auth.begin_enroll(self.conn, uid, account)
+        out["changing"] = changing
         out["twofa"] = factor if factor in auth.PENDING else ""
         return 200, out
 
@@ -2277,12 +2317,19 @@ class App:
         return 200, {"ok": True, "recovery": codes, "recovery_left": len(codes)}
 
     def twofa_disable(self, q, body):
-        """Turn the factor off. An admin may not: that account reads every other."""
+        """Turn the factor off, given a current code.
+
+        An administrator is refused only while the deployment forces a factor on
+        admins (FIRESIDE_REQUIRE_2FA). That is the server's rule and not mine to
+        hide: a blanket "admins may never turn this off" left the one account
+        that owns the box with no way back to a plain login.
+        """
         factor, uid = self._twofa_who(q)
         if not uid or factor in auth.PENDING:
             return 401, {"error": "auth required"}
-        if auth.is_admin(self.conn, uid):
-            return 403, {"error": "an administrator cannot turn off the second factor"}
+        if auth.is_admin(self.conn, uid) and auth.require_admins_on():
+            return 403, {"error": "this server requires a second factor for "
+                                  "administrators (FIRESIDE_REQUIRE_2FA)"}
         if not self._allow_attempt(uid, "disable"):
             return 429, {"error": "too many attempts"}
         b = body or {}

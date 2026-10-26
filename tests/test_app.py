@@ -230,6 +230,41 @@ class TestApp(unittest.TestCase):
         s, prog = self._jget("/progress?user=u1&book=%s" % d["book_id"])
         self.assertTrue(all(c["rendered"] for c in prog["chapters"]))
 
+    def test_example_book_carries_its_record(self):
+        # A free book with a title and nothing else reads as an empty record:
+        # no author line, no blurb, no cover. The bundled asset is the one
+        # source for all of it, and the date and publisher are real (David
+        # Nutt, London, 1888) rather than invented to fill the panel.
+        s, d = self._post("/book/example", {"user": "u1"})
+        self.assertEqual(s, 200)
+        s, prog = self._jget("/progress?user=u1&book=%s" % d["book_id"])
+        b = prog["book"]
+        self.assertEqual(b["author"], "Oscar Wilde")
+        self.assertEqual(b["publisher"], "David Nutt, London")
+        self.assertEqual(b["published"], "1888")
+        self.assertIn("fairy tales", b["description"])
+        self.assertEqual(b["isbn"], "")   # a PG text has no ISBN; don't fake one
+        s, cover = self._get("/cover?book=%s" % d["book_id"])
+        self.assertEqual(s, 200)
+        self.assertTrue(cover.startswith(b"\xff\xd8"))   # a real jpeg
+
+    def test_example_book_fills_an_old_copy_blanks_only(self):
+        # Copies added before the record was complete must gain it, and the
+        # reader's own words must survive.
+        from host import library
+        s, d = self._post("/book/example", {"user": "u1"})
+        bid = d["book_id"]
+        self.app.conn.execute(
+            "UPDATE books SET author='',publisher='',published='',description=?"
+            " WHERE id=?", ("my own blurb", bid))
+        self.app.conn.commit()
+        s, d2 = self._post("/book/example", {"user": "u1"})
+        self.assertTrue(d2["existing"])
+        b = library.get_book(self.app.conn, bid)
+        self.assertEqual(b["author"], "Oscar Wilde")
+        self.assertEqual(b["publisher"], "David Nutt, London")
+        self.assertEqual(b["description"], "my own blurb")
+
     def test_text_and_progress_fields(self):
         # the story page reads /text; the player counts chars from /progress
         s, imp = self._post("/import", {"user": "u1", "kind": "upload"})
