@@ -599,6 +599,21 @@
       <h3 style="margin-top:30px" data-t="Connected accounts">Connected accounts</h3>
       <p class="sub" data-t="Sign in with Google, GitHub, Microsoft or SimpleLogin instead of a password. Link one here while you are signed in.">Sign in with Google, GitHub, Microsoft or SimpleLogin instead of a password. Link one here while you are signed in.</p>
       <div id="oauthrows"></div>
+      <h3 style="margin-top:30px" data-t="Two-factor">Two-factor</h3>
+      <p class="sub" data-t="A six-digit code from an authenticator app, on top of your password. Optional, and worth it: your password alone is one stolen line away from a stranger reading your library.">A six-digit code from an authenticator app, on top of your password. Optional, and worth it: your password alone is one stolen line away from a stranger reading your library.</p>
+      <div id="twofastatus" class="sub"></div>
+      <div id="twofaoff" style="margin-top:10px">
+        <button class="btn" id="twofastart" type="button" data-t="Set up two-factor">Set up two-factor</button>
+      </div>
+      <div id="twofaon" style="margin-top:10px" hidden>
+        <input type="text" id="twofacode" inputmode="numeric" autocomplete="one-time-code"
+               placeholder="123456" data-t-ph="123456" style="max-width:160px">
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn quiet" id="twofarecov" type="button" data-t="New recovery codes">New recovery codes</button>
+          <button class="btn quiet" id="twofaoffbtn" type="button" data-t="Turn off two-factor">Turn off two-factor</button>
+        </div>
+      </div>
+      <div id="twofamessage" class="sub" style="margin-top:8px"></div>
       <h3 style="margin-top:30px" data-t="Devices &amp; sessions">Devices &amp; sessions</h3>
       <p class="sub" data-t="Everywhere this account is signed in. Log out a device you do not recognise.">Everywhere this account is signed in. Log out a device you do not recognise.</p>
       <div id="sessionrows"></div>
@@ -743,6 +758,30 @@
     <div class="connrow">
       <button class="btn quiet" id="pilater" type="button" data-t="Later">Later</button>
       <button class="btn" id="pigo" type="button" data-t="Re-encode only these">Re-encode only these</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="twofadlg" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Two-factor" data-t-aria="Two-factor">
+    <h3 id="twofatitle" data-t="Two-factor">Two-factor</h3>
+    <p class="sub" id="twofasub"></p>
+    <div id="twofaenrol" hidden>
+      <p class="sub" data-t="Add this key to your authenticator app, then type the six digits it shows.">Add this key to your authenticator app, then type the six digits it shows.</p>
+      <div class="qrow"><span class="qt" id="twofasecret" style="font-family:ui-monospace,monospace"></span></div>
+      <p class="hint" id="twofauri"></p>
+    </div>
+    <label for="twofainput" data-t="Six-digit code">Six-digit code</label>
+    <input type="text" id="twofainput" inputmode="numeric" autocomplete="one-time-code"
+           placeholder="123456" data-t-ph="123456" style="max-width:180px">
+    <div id="twofarecowrap" hidden>
+      <label for="twofareco" data-t="Recovery code">Recovery code</label>
+      <input type="text" id="twofareco" autocomplete="off" style="max-width:220px">
+    </div>
+    <div id="twofaerr" class="sub" style="margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" id="twofago" type="button" data-t="Check the code">Check the code</button>
+      <button class="btn quiet" id="twofacancel" type="button" data-t="Cancel">Cancel</button>
     </div>
   </div>
 </div>
@@ -1009,6 +1048,7 @@ function setSetTab(p) {
   document.querySelectorAll('#v-set .setpanel').forEach(el => el.classList.toggle('on', el.dataset.p === p));
   try { localStorage.setItem(SETTAB_KEY, p); } catch (_) {}
   if (p === 'plan') loadCredits();
+  if (p === 'account') loadTwofa();
 }
 if ($('#settabs')) document.querySelectorAll('#settabs button').forEach(b => b.onclick = () => setSetTab(b.dataset.p));
 /* Language: the list comes from the server (one JSON catalog per language in
@@ -2109,6 +2149,126 @@ if ($('#sessall')) $('#sessall').onclick = () => {
 if ($('#sessallusers')) $('#sessallusers').onclick = () => {
   if (confirm('Boot every session on the server, except this one?')) revokeSessions(true, true);
 };
+// --- two-factor: one modal for enrolling and for finishing a login ----------
+// The server decides whether a factor is owed (auth.create_session does it at
+// every door), so this code never asks "should I?". It asks /2fa what a
+// session still owes and shows one of two screens: set one up, or type one.
+const TWOFA = { mode: '', onDone: null };
+function twofaShow(mode, onDone) {
+  TWOFA.mode = mode; TWOFA.onDone = onDone || null;
+  const d = $('#twofadlg'); if (!d) return;
+  $('#twofaenrol').hidden = mode !== 'enroll';
+  $('#twofacancel').hidden = mode === 'enroll';
+  $('#twofatitle').textContent = mode === 'enroll'
+    ? 'Turn on two-factor' : 'One more step';
+  $('#twofasub').textContent = mode === 'enroll'
+    ? 'Scan or type the key into an authenticator app (Google Authenticator, Authy, 1Password).'
+    : 'Your password was right. Now the six-digit code from your authenticator app.';
+  $('#twofaerr').textContent = '';
+  $('#twofago').hidden = false; $('#twofainput').hidden = false;
+  $('#twofainput').value = ''; $('#twofareco').value = '';
+  $('#twofarecowrap').hidden = mode === 'enroll';
+  d.hidden = false;
+  setTimeout(() => { try { $('#twofainput').focus(); } catch (_) {} }, 30);
+}
+async function twofaEnrollStart() {
+  const info = await jpost('/2fa/enroll', {});
+  $('#twofasecret').textContent = (info.secret || '').replace(/(.{4})/g, '$1 ').trim();
+  const a = $('#twofauri');
+  a.innerHTML = '';
+  const link = document.createElement('a');
+  link.href = info.uri || '#'; link.textContent = 'open in an authenticator app →';
+  a.append('Or '); a.append(link);
+  twofaShow('enroll', () => { location.reload(); });
+}
+async function twofaSubmit() {
+  const code = ($('#twofainput').value || '').replace(/[^0-9]/g, '');
+  const rec = ($('#twofareco').value || '').trim();
+  $('#twofaerr').textContent = '';
+  $('#twofago').disabled = true;
+  try {
+    if (TWOFA.mode === 'enroll') {
+      const d = await jpost('/2fa/confirm', { code });
+      const codes = d.recovery || [];
+      // the codes exist only in this reply, so they are shown once and plainly
+      twofaShow('codes');
+      $('#twofaenrol').hidden = true;
+      $('#twofarecowrap').hidden = true;
+      $('#twofacancel').hidden = true;
+      $('#twofago').hidden = true;
+      $('#twofainput').hidden = true;
+      $('#twofasub').textContent = 'Save these somewhere safe. Each one signs you in once, and this is the only time they are shown.';
+      const box = $('#twofaerr');
+      box.innerHTML = '';
+      codes.forEach(c => {
+        const row = document.createElement('div');
+        row.className = 'qrow'; row.style.marginTop = '6px';
+        row.textContent = c; box.append(row);
+      });
+      const done = document.createElement('button');
+      done.className = 'btn'; done.type = 'button'; done.textContent = 'I saved them';
+      done.style.marginTop = '14px';
+      done.onclick = () => { $('#twofadlg').hidden = true; if (TWOFA.onDone) TWOFA.onDone(); };
+      box.append(done);
+    } else {
+      await jpost('/2fa/verify', rec ? { recovery: rec } : { code });
+      $('#twofadlg').hidden = true;
+      if (TWOFA.onDone) TWOFA.onDone(); else location.reload();
+    }
+  } catch (e) {
+    $('#twofaerr').textContent = e.message || 'that did not work';
+  } finally { $('#twofago').disabled = false; }
+}
+if ($('#twofago')) $('#twofago').onclick = twofaSubmit;
+if ($('#twofacancel')) $('#twofacancel').onclick = () => {
+  $('#twofadlg').hidden = true;
+  document.body.classList.add('locked'); $('#lock').hidden = false;
+};
+
+async function loadTwofa() {
+  const box = $('#twofastatus'); if (!box) return;
+  let st = {};
+  try { st = await api('/2fa') || {}; } catch (_) { return; }
+  const on = !!st.enrolled;
+  $('#twofaoff').hidden = on;
+  $('#twofaon').hidden = !on;
+  $('#twofamessage').textContent = '';
+  if (on) {
+    box.textContent = 'On. ' + (st.recovery_left || 0) + ' recovery code(s) left.';
+  } else if (st.required) {
+    box.textContent = 'Required for this account, because it administers the server.';
+  } else {
+    box.textContent = 'Off.';
+  }
+  $('#twofaoffbtn').disabled = !!st.required;
+  if (st.required) $('#twofaoffbtn').textContent = 'Required for admins';
+}
+if ($('#twofastart')) $('#twofastart').onclick = () => {
+  twofaEnrollStart().catch(e => { $('#twofamessage').textContent = e.message || 'could not start'; });
+};
+if ($('#twofarecov')) $('#twofarecov').onclick = async () => {
+  const code = ($('#twofacode').value || '').replace(/[^0-9]/g, '');
+  try {
+    const d = await jpost('/2fa/recovery', { code });
+    const codes = (d.recovery || []).join('\n');
+    $('#twofamessage').textContent = 'New codes (this is the only time they are shown):';
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'white-space:pre-wrap;font-size:13px;margin-top:6px';
+    pre.textContent = codes;
+    $('#twofamessage').append(pre);
+    loadTwofa();
+  } catch (e) { $('#twofamessage').textContent = e.message || 'could not issue new codes'; }
+};
+if ($('#twofaoffbtn')) $('#twofaoffbtn').onclick = async () => {
+  const code = ($('#twofacode').value || '').replace(/[^0-9]/g, '');
+  if (!confirm('Turn off two-factor for this account?')) return;
+  try {
+    await jpost('/2fa/disable', { code });
+    $('#twofamessage').textContent = 'Two-factor is off.';
+    loadTwofa();
+  } catch (e) { $('#twofamessage').textContent = e.message || 'could not turn it off'; }
+};
+
 // --- deleting the account: the one button with no undo ---------------------
 // Proof matches the account's own door: a password account confirms with its
 // password; a social-only account has none to give, so it types the phrase.
@@ -2248,6 +2408,22 @@ async function authSubmit() {
 }
 
 async function requireSession() {
+  // A half-session is signed in and one factor short. Ask before anything
+  // else: every other call answers 401 with a twofa field, which without this
+  // reads exactly like being signed out.
+  let owed = '';
+  try { const r = await fetch('/2fa'); if (r.ok) owed = (await r.json()).twofa || ''; } catch (_) {}
+  if (owed) {
+    document.body.classList.add('locked');
+    $('#lock').hidden = true;              // the lock screen would invite a login
+    document.querySelectorAll('#tabs button').forEach(b => { b.hidden = true; });
+    if (owed === 'pending_enroll') {
+      twofaEnrollStart().catch(() => twofaShow('enroll'));
+    } else {
+      twofaShow('verify', () => location.reload());
+    }
+    return false;
+  }
   let pol = {}, me = { authenticated: false, user: '' };
   try { pol = await api('/auth/policy'); } catch (_) {}
   AUTH.providers = pol.providers || [];

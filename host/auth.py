@@ -26,7 +26,13 @@ import time
 import urllib.parse
 import urllib.request
 
+try:
+    from host import totp
+except ImportError:          # started from inside host/ instead of the repo root
+    import totp
+
 SESSION_TTL = 30 * 24 * 3600          # 30 days; cookie and row share it
+PENDING_TTL = 10 * 60                 # a half-session: long enough to type a code
 STATE_COOKIE = "fireside_oauth_state"
 LINK_COOKIE = "fireside_oauth_link"
 CLAIM_COOKIE = "fireside_oauth_claim"
@@ -361,16 +367,199 @@ def device_label(user_agent):
     return "%s on %s" % (browser, kind) if kind else browser
 
 
-def create_session(conn, user_id, provider, ttl=SESSION_TTL, ua="", ip=""):
+# ---- two-factor ---------------------------------------------------------
+# The fold: every login path mints through create_session and resolves through
+# session_row, so neither the second factor nor its enforcement needs a line
+# in any login route. The mint decides the state itself, because it is the one
+# place that already knows the user.
+FACTOR_OK = "ok"
+PENDING_CODE = "pending_code"      # has a confirmed secret, needs a code
+PENDING_ENROLL = "pending_enroll"  # must enrol now (admins)
+PENDING = (PENDING_CODE, PENDING_ENROLL)
+
+
+def enrolled(conn, user_id):
+    """Has this user finished enrolling? An unconfirmed secret does not count."""
+    if not user_id:
+        return False
+    row = conn.execute("SELECT secret,confirmed_at FROM twofa WHERE user_id=?",
+                       (user_id,)).fetchone()
+    return bool(row and row["secret"] and int(row["confirmed_at"] or 0))
+
+
+def require_admins_on():
+    """Is forced enrolment for admins switched on for this deployment?
+
+    Off by default, on purpose: turning this on before a screen exists locks
+    the administrator out of their own box, and the only account that can fix
+    that is the one being locked out. So the switch is a deployment decision
+    made after the screen ships, not a constant in the source.
+    """
+    return str(os.environ.get("FIRESIDE_REQUIRE_2FA", "") or "").strip().lower() \
+        in ("1", "true", "yes", "on")
+
+
+def factor_for(conn, user_id):
+    """What a session minted for this user right now has to be.
+
+    Optional for everyone, and for admins once FIRESIDE_REQUIRE_2FA is on - an
+    administrator can read every other account on the box, so that is the
+    account worth a second key.
+    """
+    if enrolled(conn, user_id):
+        return PENDING_CODE
+    if is_admin(conn, user_id) and require_admins_on():
+        return PENDING_ENROLL
+    return FACTOR_OK
+
+
+def _factor_of(row):
+    return str((row["factor"] if row is not None else "") or FACTOR_OK)
+
+
+def create_session(conn, user_id, provider, ttl=SESSION_TTL, ua="", ip="",
+                   factor=None):
     tok = secrets.token_urlsafe(32)
     sid = secrets.token_hex(8)          # a public handle, safe to show and revoke by
     now = int(time.time())
+    if factor is None:
+        factor = factor_for(conn, user_id)
+    # a pending session is a half-session. It authorises nothing but finishing
+    # the factor, and it must not sit in a browser for a month while it waits.
+    life = ttl if factor == FACTOR_OK else min(ttl, PENDING_TTL)
     conn.execute("INSERT INTO sessions"
-                 "(token,user_id,provider,created_at,expires_at,sid,user_agent,ip,last_seen)"
-                 " VALUES(?,?,?,?,?,?,?,?,?)",
-                 (tok, user_id, provider, now, now + ttl, sid, ua or "", ip or "", now))
+                 "(token,user_id,provider,created_at,expires_at,sid,user_agent,ip,"
+                 "last_seen,factor) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                 (tok, user_id, provider, now, now + life, sid, ua or "", ip or "",
+                  now, factor))
     conn.commit()
     return tok
+
+
+def session_state(conn, token):
+    """(factor, user_id) for a live token, or (None, None).
+
+    For an unfinished login use pending_state() instead: this reports ok for a
+    pending row only if you ask for it, never by accident.
+    """
+    row = session_row(conn, token)
+    if row is None:
+        return None, None
+    return _factor_of(row), row["user_id"]
+
+
+def pending_state(conn, token):
+    """The factor a token still owes, or "" when it owes none."""
+    f, _uid = session_state(conn, token)
+    return f if f in PENDING else ""
+
+
+def satisfy_factor(conn, token):
+    """Turn a half-session into a full one. Returns its user_id, or None."""
+    row = session_row(conn, token)
+    if row is None:
+        return None
+    if _factor_of(row) not in PENDING:
+        return row["user_id"]
+    conn.execute("UPDATE sessions SET factor=?, expires_at=? WHERE token=?",
+                 (FACTOR_OK, int(time.time()) + SESSION_TTL, token))
+    conn.commit()
+    return row["user_id"]
+
+
+def _rc_hash(code):
+    c = "".join(str(code or "").split()).lower()
+    return hashlib.sha256(c.encode("utf-8")).hexdigest()
+
+
+def issue_recovery_codes(conn, user_id):
+    """Ten fresh one-time codes. Returned once, stored as hashes."""
+    codes = totp.new_recovery_codes()
+    conn.execute("DELETE FROM twofa_recovery WHERE user_id=?", (user_id,))
+    for c in codes:
+        conn.execute("INSERT INTO twofa_recovery(user_id,code_hash,used_at)"
+                     " VALUES(?,?,0)", (user_id, _rc_hash(c)))
+    conn.commit()
+    return codes
+
+
+def recovery_code_left(conn, user_id):
+    row = conn.execute("SELECT COUNT(*) n FROM twofa_recovery"
+                       " WHERE user_id=? AND used_at=0", (user_id,)).fetchone()
+    return int(row["n"] or 0)
+
+
+def spend_recovery_code(conn, user_id, code):
+    """One-shot: a code that matched once can never match again."""
+    h = _rc_hash(code)
+    if not user_id or not h:
+        return False
+    row = conn.execute("SELECT used_at FROM twofa_recovery"
+                       " WHERE user_id=? AND code_hash=?", (user_id, h)).fetchone()
+    if row is None or int(row["used_at"] or 0):
+        return False
+    conn.execute("UPDATE twofa_recovery SET used_at=?"
+                 " WHERE user_id=? AND code_hash=? AND used_at=0",
+                 (int(time.time()), user_id, h))
+    conn.commit()
+    return True
+
+
+def begin_enroll(conn, user_id, account=""):
+    """Write a NEW unconfirmed secret and hand back what the phone needs.
+
+    Calling this twice does not leave a working first secret behind: the row is
+    replaced and confirmed_at drops back to 0, so an interrupted enrolment
+    cannot hold a live key nobody scanned.
+    """
+    sec = totp.new_secret()
+    conn.execute("INSERT INTO twofa(user_id,secret,confirmed_at,last_counter,created_at)"
+                 " VALUES(?,?,0,0,?)"
+                 " ON CONFLICT(user_id) DO UPDATE SET secret=excluded.secret,"
+                 " confirmed_at=0, last_counter=0",
+                 (user_id, sec, int(time.time())))
+    conn.commit()
+    return {"secret": sec,
+            "uri": totp.provisioning_uri(sec, account or user_id),
+            "digits": totp.DIGITS, "period": totp.STEP}
+
+
+def confirm_enroll(conn, user_id, code):
+    """Prove the secret is in a working app before anything depends on it."""
+    row = conn.execute("SELECT secret FROM twofa WHERE user_id=?",
+                       (user_id,)).fetchone()
+    if row is None or not row["secret"]:
+        return None
+    counter = totp.verify(row["secret"], code)
+    if counter is None:
+        return None
+    conn.execute("UPDATE twofa SET confirmed_at=?, last_counter=? WHERE user_id=?",
+                 (int(time.time()), counter, user_id))
+    conn.commit()
+    return issue_recovery_codes(conn, user_id)
+
+
+def check_code(conn, user_id, code):
+    """Does this TOTP code open this account right now? Replays are refused."""
+    row = conn.execute("SELECT secret,confirmed_at,last_counter FROM twofa"
+                       " WHERE user_id=?", (user_id,)).fetchone()
+    if row is None or not row["secret"] or not int(row["confirmed_at"] or 0):
+        return False
+    counter = totp.verify(row["secret"], code)
+    if counter is None:
+        return False
+    if counter <= int(row["last_counter"] or 0):
+        return False                    # the same code, seen twice
+    conn.execute("UPDATE twofa SET last_counter=? WHERE user_id=?",
+                 (counter, user_id))
+    conn.commit()
+    return True
+
+
+def disable_2fa(conn, user_id):
+    conn.execute("DELETE FROM twofa WHERE user_id=?", (user_id,))
+    conn.execute("DELETE FROM twofa_recovery WHERE user_id=?", (user_id,))
+    conn.commit()
 
 
 def session_row(conn, token):
@@ -393,8 +582,11 @@ def session_row(conn, token):
 
 
 def session_user(conn, token):
+    """The user a full session belongs to. A pending session is nobody yet."""
     row = session_row(conn, token)
-    return row["user_id"] if row is not None else None
+    if row is None or _factor_of(row) in PENDING:
+        return None
+    return row["user_id"]
 
 
 def delete_session(conn, token):
