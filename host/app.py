@@ -2174,6 +2174,126 @@ class App:
             return 401, {"error": "auth required"}
         return 200, {"linked": auth.linked_providers(self.conn, uid)}
 
+    # ---- the second factor ---------------------------------------------------
+    # Six login paths mint sessions, and none of them mentions two-factor: the
+    # gate lives in the dispatch table plus auth.create_session. These handlers
+    # are the only places that know a factor exists.
+
+    def _twofa_who(self, q):
+        """(factor, user_id) for the caller, pending or not.
+
+        A half-session has a user id but no authority, so every handler below
+        reads both from here instead of from q["_user"], which is "" until the
+        factor is done.
+        """
+        factor, uid = auth.session_state(self.conn, (q or {}).get("_token") or "")
+        return (factor or ""), (uid or "")
+
+    def _account_name(self, uid):
+        """What the authenticator app should label this account as."""
+        row = self.conn.execute("SELECT username FROM local_accounts WHERE user_id=?",
+                               (uid,)).fetchone()
+        return ((row["username"] if row else "") or uid)
+
+    def _allow_attempt(self, uid, kind):
+        return self.door_limiter.allow("2fa:%s:%s" % (kind, uid or "?"))
+
+    def twofa_status(self, q, body):
+        """What this session still owes, before the client renders anything."""
+        factor, uid = self._twofa_who(q)
+        return 200, {
+            "twofa": factor if factor in auth.PENDING else "",
+            "enrolled": auth.enrolled(self.conn, uid),
+            "recovery_left": auth.recovery_code_left(self.conn, uid),
+            "required": bool(uid) and auth.is_admin(self.conn, uid),
+        }
+
+    def twofa_enroll(self, q, body):
+        """Start enrolment: a fresh secret and the otpauth:// URI for the phone.
+
+        Starting over is safe and deliberate: begin_enroll replaces the secret
+        and un-confirms it, so an interrupted enrolment cannot leave a key
+        behind that nobody scanned.
+        """
+        factor, uid = self._twofa_who(q)
+        if not uid:
+            return 401, {"error": "auth required"}
+        if not self._allow_attempt(uid, "enroll"):
+            return 429, {"error": "too many attempts"}
+        account = (body or {}).get("account") or self._account_name(uid)
+        out = auth.begin_enroll(self.conn, uid, account)
+        out["twofa"] = factor if factor in auth.PENDING else ""
+        return 200, out
+
+    def twofa_confirm(self, q, body):
+        """Prove the secret works. Nothing may depend on it before this passes."""
+        factor, uid = self._twofa_who(q)
+        if not uid:
+            return 401, {"error": "auth required"}
+        if not self._allow_attempt(uid, "confirm"):
+            return 429, {"error": "too many attempts"}
+        codes = auth.confirm_enroll(self.conn, uid, (body or {}).get("code"))
+        if codes is None:
+            return 400, {"error": "that code did not match"}
+        out = {"ok": True, "twofa": "", "recovery": codes,
+               "recovery_left": len(codes)}
+        if factor in auth.PENDING:
+            # an admin finishing a forced enrolment is not made to log in a
+            # second time: the same session becomes a full one here.
+            auth.satisfy_factor(self.conn, (q or {}).get("_token") or "")
+        return 200, out
+
+    def twofa_verify(self, q, body):
+        """Finish a login: a TOTP code or a recovery code, then a full session."""
+        factor, uid = self._twofa_who(q)
+        if not uid:
+            return 401, {"error": "auth required"}
+        if factor not in auth.PENDING:
+            return 200, {"ok": True, "twofa": ""}
+        if not self._allow_attempt(uid, "verify"):
+            return 429, {"error": "too many attempts"}
+        b = body or {}
+        used = "code"
+        if (b.get("recovery") or "").strip():
+            used = "recovery"
+            if not auth.spend_recovery_code(self.conn, uid, b.get("recovery")):
+                return 401, {"error": "that recovery code is not valid"}
+        elif not auth.check_code(self.conn, uid, b.get("code")):
+            return 401, {"error": "that code did not match"}
+        auth.satisfy_factor(self.conn, (q or {}).get("_token") or "")
+        return 200, {"ok": True, "user": uid, "twofa": "", "used": used,
+                     "recovery_left": auth.recovery_code_left(self.conn, uid)}
+
+    def twofa_recovery(self, q, body):
+        """New set of one-time codes, for an already enrolled account."""
+        factor, uid = self._twofa_who(q)
+        if not uid or factor in auth.PENDING or not auth.enrolled(self.conn, uid):
+            return 401, {"error": "enrol two-factor first"}
+        if not self._allow_attempt(uid, "recovery"):
+            return 429, {"error": "too many attempts"}
+        if not auth.check_code(self.conn, uid, (body or {}).get("code")):
+            return 401, {"error": "that code did not match"}
+        codes = auth.issue_recovery_codes(self.conn, uid)
+        return 200, {"ok": True, "recovery": codes, "recovery_left": len(codes)}
+
+    def twofa_disable(self, q, body):
+        """Turn the factor off. An admin may not: that account reads every other."""
+        factor, uid = self._twofa_who(q)
+        if not uid or factor in auth.PENDING:
+            return 401, {"error": "auth required"}
+        if auth.is_admin(self.conn, uid):
+            return 403, {"error": "an administrator cannot turn off the second factor"}
+        if not self._allow_attempt(uid, "disable"):
+            return 429, {"error": "too many attempts"}
+        b = body or {}
+        ok = auth.check_code(self.conn, uid, b.get("code"))
+        if not ok and (b.get("recovery") or "").strip():
+            ok = auth.spend_recovery_code(self.conn, uid, b.get("recovery"))
+        if not ok:
+            return 401, {"error": "that code did not match"}
+        auth.disable_2fa(self.conn, uid)
+        return 200, {"ok": True, "enrolled": False}
+
     # ---- devices and sessions (see and end a session anywhere) ---------------
 
     def _session_state(self, q, uid):
@@ -2334,6 +2454,7 @@ GET_ROUTES = {
     "/auth/providers": "auth_providers", "/me": "me", "/auth/policy": "auth_policy",
     "/auth/linked": "auth_linked",
     "/sessions": "sessions_list",
+    "/2fa": "twofa_status",
     "/auth/users": "auth_users", "/credits": "credits",
     "/grants": "grants_list",
     "/admin/plans": "plans_admin",
@@ -2366,6 +2487,9 @@ POST_ROUTES = {
     "/billing/checkout": "billing_checkout", "/billing/confirm": "billing_confirm",
     "/billing/cancel": "billing_cancel", "/billing/portal": "billing_portal",
     "/credits/confirm": "credits_confirm",
+    "/2fa/enroll": "twofa_enroll", "/2fa/confirm": "twofa_confirm",
+    "/2fa/verify": "twofa_verify", "/2fa/recovery": "twofa_recovery",
+    "/2fa/disable": "twofa_disable",
     "/sessions/revoke": "session_revoke",
     "/sessions/revoke_all": "sessions_revoke_all",
 }
@@ -2377,6 +2501,14 @@ PUBLIC_ROUTES = {"/", "/index.html", "/i18n.js", "/favicon.ico", "/health", "/au
                  "/privacy", "/terms", "/delete-account",
                  "/manifest.webmanifest", "/sw.js",
                  "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
+
+# What a half-session may still reach: the screen that finishes the factor,
+# and nothing else. Keyed by the factor it owes, because an admin who must
+# enrol and a user who must type a code need different doors.
+PENDING_ROUTES = {
+    auth.PENDING_CODE: {"/2fa", "/2fa/verify"},
+    auth.PENDING_ENROLL: {"/2fa", "/2fa/enroll", "/2fa/confirm"},
+}
 
 # auth sub-routes the handler serves directly (they set cookies / redirect),
 # so they are not in the GET/POST dispatch tables above. Declared here so the
@@ -2769,6 +2901,22 @@ def make_handler(app):
                 return self._json(503, {"error": "session lookup failed: %s: %s"
                                                  % (type(e).__name__, e)})
             q["_token"] = self._token()
+            # ---- the second factor gate, once ------------------------------
+            # A half-session authorises nothing except finishing the factor.
+            # Every login path mints through auth.create_session, so this is
+            # the one place enforcement has to exist: a new door added later
+            # inherits it without knowing 2FA exists.
+            try:
+                q["_pending"] = auth.pending_state(app.conn, q["_token"]) or ""
+            except Exception:
+                q["_pending"] = ""
+            q["_allowed"] = (PENDING_ROUTES.get(q["_pending"], frozenset())
+                             if q["_pending"] else frozenset())
+            if q["_pending"]:
+                public = path in PUBLIC_ROUTES and path != "/me"
+                if path not in q["_allowed"] and not public:
+                    return self._json(401, {"twofa": q["_pending"],
+                                            "error": "second factor required"})
             # three things a handler needs that only the request knows: where
             # this box is reachable (for a return URL we control), who is
             # calling (for the unauthenticated doors), and the caller's
@@ -2779,7 +2927,8 @@ def make_handler(app):
             # language: ?lang= then the fs_lang cookie then Accept-Language
             q["_lang"] = i18n.negotiate(q.get("lang"), self._cookie(i18n.COOKIE),
                                         self.headers.get("Accept-Language"))
-            if app.require_auth and path not in PUBLIC_ROUTES and not q["_user"]:
+            if (app.require_auth and path not in PUBLIC_ROUTES and not q["_user"]
+                    and path not in q["_allowed"]):
                 return self._json(401, {"error": "auth required"})
             try:
                 status, payload = getattr(app, name)(q, body)

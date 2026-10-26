@@ -96,7 +96,19 @@ CREATE TABLE IF NOT EXISTS credentials (
     PRIMARY KEY (user_id, provider));
 CREATE TABLE IF NOT EXISTS sessions (
     token VARCHAR(191) PRIMARY KEY, user_id VARCHAR(128), provider VARCHAR(32),
-    created_at BIGINT, expires_at BIGINT);
+    created_at BIGINT, expires_at BIGINT, factor VARCHAR(16) DEFAULT 'ok');
+-- one row per enrolled user. confirmed_at is 0 while a secret is being set up:
+-- an unconfirmed secret must not gate anything, or a half-finished enrolment
+-- locks its own account out.
+CREATE TABLE IF NOT EXISTS twofa (
+    user_id VARCHAR(128) PRIMARY KEY, secret VARCHAR(64),
+    confirmed_at BIGINT DEFAULT 0, last_counter BIGINT DEFAULT 0,
+    created_at BIGINT);
+-- recovery codes are stored as hashes: the plaintext exists once, on the screen
+-- that hands them over, and never again.
+CREATE TABLE IF NOT EXISTS twofa_recovery (
+    user_id VARCHAR(128), code_hash VARCHAR(191), used_at BIGINT DEFAULT 0,
+    PRIMARY KEY (user_id, code_hash));
 CREATE TABLE IF NOT EXISTS local_accounts (
     username VARCHAR(191) PRIMARY KEY, user_id VARCHAR(128), digest TEXT, salt TEXT,
     email VARCHAR(255) DEFAULT '', created_at VARCHAR(32));
@@ -280,6 +292,9 @@ _ADDED_COLUMNS = [
     ("sessions", "user_agent", "TEXT"),
     ("sessions", "ip", "VARCHAR(64) DEFAULT ''"),
     ("sessions", "last_seen", "BIGINT DEFAULT 0"),
+    # ok, pending_code or pending_enroll. A pending session authorises nothing
+    # except finishing the second factor; empty (old rows) means ok.
+    ("sessions", "factor", "VARCHAR(16) DEFAULT 'ok'"),
     # the address a password account registered with. Optional on old rows;
     # the social door reads it to spot an account that already exists.
     ("local_accounts", "email", "VARCHAR(255) DEFAULT ''"),
