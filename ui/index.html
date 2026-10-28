@@ -2557,9 +2557,6 @@ async function authSubmit() {
 }
 
 async function requireSession() {
-  // On the lock screen there is no session to interrogate, and asking anyway
-  // puts a 401 in every first visitor's console.
-  if (document.body.classList.contains('locked')) return false;
   // A half-session is signed in and one factor short. Ask before anything
   // else: every other call answers 401 with a twofa field, which without this
   // reads exactly like being signed out.
