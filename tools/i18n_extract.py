@@ -121,6 +121,42 @@ def map_outside(src, fn):
                    for i, part in enumerate(OPAQUE.split(src)))
 
 
+# --- script strings -------------------------------------------------------
+# The page half of the client is markup; the other half is script, and the
+# script was the gap that made Spanish a half-language. A message written in
+# JS is a call, not an element, so the markup pass cannot see it: those strings
+# live inside T('...') and this pass reads them straight out of the call.
+# The literal arrives at runtime already decoded (T receives the value, not the
+# source), so the key has to be decoded the same way or it never matches.
+SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.S | re.I)
+T_CALL = re.compile(r"(?<![\w.])T\(\s*(['\"])((?:\\.|(?!\1)[^\\\n])*)\1\s*[,)]")
+JS_ESC = re.compile(r"\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|.)", re.S)
+
+
+def js_unescape(s):
+    def one(m):
+        g = m.group(1)
+        if g[0] == "u" and len(g) == 5:
+            return chr(int(g[1:], 16))
+        if g[0] == "x" and len(g) == 3:
+            return chr(int(g[1:], 16))
+        return {"n": "\n", "t": "\t", "r": "\r", "0": "\0"}.get(g, g)
+    return JS_ESC.sub(one, s)
+
+
+def script_strings(src):
+    """Every key passed to T() in a script block, decoded, in page order."""
+    keys = []
+    for body in SCRIPT.findall(src):
+        # A block that is data (JSON-LD, importmap) is not code.
+        head = src[src.find(body) - 60:src.find(body)]
+        for m in T_CALL.finditer(body):
+            v = js_unescape(m.group(2))
+            if v and v not in keys:
+                keys.append(v)
+    return keys
+
+
 def analyse():
     src = open(PAGE, encoding="utf-8").read()
     f = TextFinder()
@@ -145,6 +181,9 @@ def check():
     for t, v in todo[:40]:
         print("  <%s> %s" % (t, v))
     print("attribute strings: %d" % len(f.attrs))
+    js = set(script_strings(src))
+    print("T() script strings: %d" % len(js))
+    unused = sorted(set(unused) - js)
     print("catalog entries not present in the page: %d" % len(unused))
     for v in unused[:20]:
         print("  - %s" % v)
@@ -194,6 +233,8 @@ def write():
 
     for name, v in f.attrs:
         want[html.unescape(v)] = html.unescape(v)
+    for v in script_strings(src):
+        want[v] = v
 
     os.makedirs(os.path.dirname(CATALOG), exist_ok=True)
     old = {}
@@ -211,8 +252,10 @@ def write():
     with open(CATALOG, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=1, sort_keys=False)
         fh.write("\n")
-    print("saw %d static strings, %d attributes; catalog now %d entries"
-          % (len(want), len(f.attrs), len(messages)))
+    print("saw %d markup strings, %d attributes, %d script strings; "
+          "catalog now %d entries"
+          % (len(f.simple), len(f.attrs), len(script_strings(src)),
+             len(messages)))
     return 0
 
 
