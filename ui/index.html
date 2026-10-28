@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-title" content="fireside">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <style>
-  /* One palette, four ways of reading it. Every colour in this file goes
+  /* One palette, five ways of reading it. Every colour in this file goes
      through these tokens, so a theme is a token block and nothing else.
      `--faint` was #7d7364 and measured 4.04:1 on --bg and 3.42:1 on --raise,
      under AA for body text, and it is what the helper lines are set in. */
@@ -30,6 +30,15 @@
     --text:#221e1a; --soft:#57503f; --faint:#6f6759;
     --flame:#8a5a12; --on-flame:#fff8ec; --ready:#2f6b3a; --warn:#9c3527;
     --ring:#8a5a12;
+  }
+  /* Colour-vision safe: the same dark neutrals, so nothing but meaning moves.
+     Ready and warn sit on the axis deuteranopes and protanopes keep (blue
+     against purple), instead of the green/red pair that collapses to one
+     muddy colour. Simulated separation is asserted in tests/test_a11y.py:
+     ready vs warn measures 31/21 dE against 10/7 for the default palette. */
+  [data-theme="cvd"]{
+    --flame:#e69f00; --on-flame:#1a1206; --ready:#56b4e9; --warn:#cc79a7;
+    --ring:#e69f00;
   }
   /* High contrast: full white on black, and the two states are told apart by
      lightness as well as hue, because colour alone is the thing some readers
@@ -366,9 +375,9 @@
   var root = document.documentElement;
   var pick = null;
   try { pick = localStorage.getItem('fs.theme'); } catch (e) {}
-  if (pick === 'light' || pick === 'dark' || pick === 'hc') {
+  if (pick === 'light' || pick === 'dark' || pick === 'hc' || pick === 'cvd') {
     root.setAttribute('data-theme', pick);
-    var dark = pick === 'dark';
+    var dark = pick !== 'light';
     root.style.colorScheme = dark ? 'dark' : 'light';
     var m = document.querySelector('meta[name="theme-color"]');
     if (m) m.setAttribute('content', pick === 'hc' ? '#000000' : (dark ? '#14110f' : '#f7f3ec'));
@@ -661,8 +670,10 @@
         <option value="light" data-t="Light">Light</option>
         <option value="dark" data-t="Dark">Dark</option>
         <option value="hc" data-t="High contrast">High contrast</option>
+        <option value="cvd" data-t="Colour-vision safe">Colour-vision safe</option>
       </select>
       <p class="hint" data-t="High contrast uses white on black with thicker borders, and the status marks are told apart by shape as well as colour.">High contrast uses white on black with thicker borders, and the status marks are told apart by shape as well as colour.</p>
+      <p class="hint" data-t="Colour-vision safe keeps the dark background and moves the status colours to blue and purple, which stay apart for the common kinds of colour blindness. Like every theme, the marks also differ in shape.">Colour-vision safe keeps the dark background and moves the status colours to blue and purple, which stay apart for the common kinds of colour blindness. Like every theme, the marks also differ in shape.</p>
       <h3 style="margin-top:24px" data-t="Password">Password</h3>
       <p class="sub" id="pwsub" data-t="The password you sign in with.">The password you sign in with.</p>
       <div id="pwcurrentrow">

@@ -208,6 +208,8 @@
     "Skip to content": "Ir al contenido",
     "Theme": "Tema",
     "Settings sections": "Secciones de ajustes",
-    "Switch between signing in and creating an account": "Cambiar entre iniciar sesión y crear una cuenta"
+    "Switch between signing in and creating an account": "Cambiar entre iniciar sesión y crear una cuenta",
+    "Colour-vision safe": "Apto para daltonismo",
+    "Colour-vision safe keeps the dark background and moves the status colours to blue and purple, which stay apart for the common kinds of colour blindness. Like every theme, the marks also differ in shape.": "El modo apto para daltonismo conserva el fondo oscuro y cambia los colores de estado a azul y morado, que se distinguen en los tipos comunes de daltonismo. Como en todos los temas, las marcas también difieren en forma."
   }
 }
