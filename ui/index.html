@@ -1042,8 +1042,8 @@ const jpostIdem = (p, o) => api(p, { method: 'POST',
 function errorText(e) {
   const d = (e && e.data) || {};
   if (d.needed != null && d.available != null) {
-    return 'Not enough characters for this run: it needs ' + nchar(d.needed)
-      + ' and you have ' + nchar(d.available) + ' available.';
+    return T('Not enough characters for this run: it needs {needed} and you have {available} available.',
+      { needed: nchar(d.needed), available: nchar(d.available) });
   }
   if (d.reason) return String(e.message) + ': ' + d.reason;
   return String(e && e.message ? e.message : e);
@@ -1119,8 +1119,9 @@ function ago(iso) { if (!iso) return '';
   const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');
   if (isNaN(t)) return '';
   const s = Math.round((Date.now() - t) / 1000);
-  if (s < 60) return 'just now'; if (s < 3600) return Math.round(s/60) + 'm ago';
-  if (s < 86400) return Math.round(s/3600) + 'h ago'; return Math.round(s/86400) + 'd ago'; }
+  if (s < 60) return T('just now'); if (s < 3600) return T('{n}m ago', { n: Math.round(s/60) });
+  if (s < 86400) return T('{n}h ago', { n: Math.round(s/3600) });
+  return T('{n}d ago', { n: Math.round(s/86400) }); }
 const hms = s => { s = Math.max(1, Math.round(s||0)); const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
   if (h) return h + 'h ' + m + 'm'; if (m) return m + 'm ' + (s%60) + 's'; return (s%60) + 's'; };
 const dur = s => { s = Math.max(0, Math.round(s||0));
@@ -1664,8 +1665,8 @@ async function loadSessions() {
     const name = document.createElement('div'); name.style.flex = '1 1 0';
     const t1 = document.createElement('div'); t1.textContent = s.label || 'Device';
     const t2 = document.createElement('div'); t2.className = 'small';
-    t2.textContent = 'last used ' + _agoUnix(s.last_seen)
-      + (s.provider ? ' · signed in with ' + s.provider : '') + (s.ip ? ' · ' + s.ip : '');
+    t2.textContent = T('last used {when}', { when: _agoUnix(s.last_seen) })
+      + (s.provider ? ' · ' + T('signed in with {provider}', { provider: s.provider }) : '') + (s.ip ? ' · ' + s.ip : '');
     name.append(t1, t2);
     row.append(name);
     if (s.current) {
@@ -1678,7 +1679,7 @@ async function loadSessions() {
       b.onclick = async () => {
         try { await jpost('/sessions/revoke', { id: s.id });
               $('#sessmsg').textContent = T('Signed that device out.'); loadSessions(); }
-        catch (e) { $('#sessmsg').textContent = e.message || 'could not sign it out'; }
+        catch (e) { $('#sessmsg').textContent = e.message || T('could not sign it out'); }
       };
       row.append(b);
     }
@@ -1700,7 +1701,7 @@ async function loadSessions() {
       const name = document.createElement('div'); name.style.flex = '1 1 0';
       const t1 = document.createElement('div'); t1.textContent = (s.user || 'unknown') + ' · ' + (s.label || 'Device');
       const t2 = document.createElement('div'); t2.className = 'small';
-      t2.textContent = 'last used ' + _agoUnix(s.last_seen) + (s.ip ? ' · ' + s.ip : '');
+      t2.textContent = T('last used {when}', { when: _agoUnix(s.last_seen) }) + (s.ip ? ' · ' + s.ip : '');
       name.append(t1, t2);
       row.append(name);
       if (s.current) {
@@ -1711,8 +1712,8 @@ async function loadSessions() {
         b.textContent = 'Boot';
         b.onclick = async () => {
           try { await jpost('/sessions/revoke', { id: s.id });
-                $('#sessmsg').textContent = 'Booted ' + (s.user || 'that session') + '.'; loadSessions(); }
-          catch (e) { $('#sessmsg').textContent = e.message || 'could not boot it'; }
+                $('#sessmsg').textContent = T('Booted {who}.', { who: s.user || T('that session') }); loadSessions(); }
+          catch (e) { $('#sessmsg').textContent = e.message || T('could not boot it'); }
         };
         row.append(b);
       }
@@ -1742,7 +1743,7 @@ async function loadGrants() {
         const body = { user: u.user_id };
         body[key] = cb.checked;
         try { await jpost('/grants', body);
-              $('#grantmsg').textContent = 'Saved for ' + u.username + '.'; }
+              $('#grantmsg').textContent = T('Saved for {user}.', { user: u.username }); }
         catch (e) { cb.checked = !cb.checked;
                     $('#grantmsg').textContent = e.message || 'could not save'; }
       };
@@ -1793,9 +1794,9 @@ async function loadCredits() {
   CREDITS = d;
   const avail = d.available || 0, held = d.reserved || 0;
   box.textContent = avail > 0
-    ? nchar(avail) + ' characters left.'
-    : '0 characters. A render through the metered voice will be refused until you buy capacity.';
-  if (held > 0) box.textContent += ' \u00b7 ' + nchar(held) + ' held by a run in progress.';
+    ? T('{n} characters left.', { n: nchar(avail) })
+    : T('0 characters. A render through the metered voice will be refused until you buy capacity.');
+  if (held > 0) box.textContent += ' \u00b7 ' + T('{n} held by a run in progress.', { n: nchar(held) });
   const sale = d.sale;
   // The sentence follows the shape the server actually sent. A null rate used to
   // mean "price unknown" even when priced buttons sat right underneath it; now a
@@ -1804,7 +1805,7 @@ async function loadCredits() {
   $('#creditsrate').textContent = !sale
     ? 'No voice server is selling characters right now, so there is nothing to buy here. Your own connected voices still work.'
     : (sale.rate_per_1m_chars != null
-      ? 'Characters cost ' + money(sale.rate_per_1m_chars) + ' per million.'
+      ? T('Characters cost {rate} per million.', { rate: money(sale.rate_per_1m_chars) })
       : (priced
         ? 'Characters are sold in the packages below.'
         : 'This voice server is not selling characters right now.'));
@@ -2224,8 +2225,8 @@ async function loadRegSetting() {
         cb.checked = p.registration_open !== false; } catch (e) {}
   cb.onchange = async () => {
     try { const d = await jpost('/auth/registration', { open: cb.checked });
-          $('#regmsg').textContent = 'Sign-ups are now '
-            + (d.registration === 'open' ? 'open.' : 'closed.');
+          $('#regmsg').textContent = d.registration === 'open'
+            ? T('Sign-ups are now open.') : T('Sign-ups are now closed.');
           AUTH.registrationOpen = cb.checked; }
     catch (e) { cb.checked = !cb.checked; $('#regmsg').textContent = e.message || 'could not save'; }
   };
@@ -2261,9 +2262,9 @@ async function revokeSessions(others, allUsers) {
     const body = { others: others }; if (allUsers) body.all_users = true;
     const d = await jpost('/sessions/revoke_all', body);
     $('#sessmsg').textContent = allUsers
-      ? ('Booted ' + (d.revoked || 0) + ' session(s) across the server.')
-      : (others ? ('Signed out ' + (d.revoked || 0) + ' other device(s).')
-                : 'Signed out of every device. Please sign in again.');
+      ? T('Booted {n} session(s) across the server.', { n: d.revoked || 0 })
+      : (others ? T('Signed out {n} other device(s).', { n: d.revoked || 0 })
+                : T('Signed out of every device. Please sign in again.'));
     if (!others && !allUsers) { setTimeout(() => location.reload(), 900); return; }
     loadSessions();
   } catch (e) { $('#sessmsg').textContent = e.message || 'could not sign out'; }
@@ -2556,6 +2557,9 @@ async function authSubmit() {
 }
 
 async function requireSession() {
+  // On the lock screen there is no session to interrogate, and asking anyway
+  // puts a 401 in every first visitor's console.
+  if (document.body.classList.contains('locked')) return false;
   // A half-session is signed in and one factor short. Ask before anything
   // else: every other call answers 401 with a twofa field, which without this
   // reads exactly like being signed out.
@@ -2789,8 +2793,10 @@ async function doImport(payload, note) {
 }
 function askReplace(payload, ex) {
   PENDING_IMPORT = payload;
-  const n = ex.rendered ? ' ' + ex.rendered + ' of them already voiced; a voice stays as long as its words did not change.' : '';
-  $('#duptext').textContent = 'Already on your shelf as "' + ex.title + '" (' + ex.chapters + ' chapter' + (ex.chapters === 1 ? '' : 's') + ').' + n;
+  const n = ex.rendered
+    ? ' ' + T('{n} of them already voiced; a voice stays as long as its words did not change.', { n: ex.rendered }) : '';
+  $('#duptext').textContent = T('Already on your shelf as "{title}" ({n} chapter(s)).',
+    { title: ex.title, n: ex.chapters }) + n;
   $('#dupnote').hidden = false;
   idle(T('That book is already in your library.'));
   $('#dupnote').scrollIntoView({ block: 'nearest' });
@@ -2842,14 +2848,14 @@ function seriesHead(g) {
   const ren = document.createElement('button'); ren.type = 'button'; ren.className = 'btn quiet sbtn'; ren.textContent = 'Rename';
   ren.onclick = async (ev) => {
     ev.stopPropagation();
-    const v = (prompt('Rename the series', g.name) || '').trim(); if (!v || v === g.name) return;
+    const v = (prompt(T('Rename the series'), g.name) || '').trim(); if (!v || v === g.name) return;
     try { await jpost('/series', { op: 'rename', id: g.id, name: v, user: USER }); await loadLibrary(); }
     catch (e) { fail(e); }
   };
   const del = document.createElement('button'); del.type = 'button'; del.className = 'btn quiet sbtn'; del.textContent = 'Delete';
   del.onclick = async (ev) => {
     ev.stopPropagation();
-    if (!confirm('Delete the series “' + g.name + '”? The books stay on your shelf.')) return;
+    if (!confirm(T('Delete the series “{name}”? The books stay on your shelf.', { name: g.name }))) return;
     try { await jpost('/series', { op: 'delete', id: g.id, user: USER }); await loadLibrary(); }
     catch (e) { fail(e); }
   };
@@ -3166,7 +3172,7 @@ function renderChapterList() {
     const canPlay = !!(r && r.audio_ref);
     const pbtn = document.createElement('button');
     pbtn.type = 'button'; pbtn.className = 'chapplay'; pbtn.textContent = '▶';
-    pbtn.title = canPlay ? 'Play this chapter' : 'Not converted in this voice';
+    pbtn.title = canPlay ? T('Play this chapter') : T('Not converted in this voice');
     pbtn.disabled = !canPlay;
     pbtn.onclick = e => { e.stopPropagation(); if (canPlay) play(c.idx, true); };
     const meta = document.createElement('div'); meta.className = 'chapmeta';
@@ -3196,8 +3202,9 @@ function selVoiceName() {
 }
 function nothingVoicedMsg(prefix) {
   const n = selVoiceName();
-  return (prefix || 'Nothing voiced yet') + (n ? ' in ' + n : '')
-    + '. Use Convert on the book page to voice it.';
+  const base = prefix || T('Nothing voiced yet');
+  return n ? T('{base} in {voice}. Use Convert on the book page to voice it.', { base: base, voice: n })
+           : T('{base}. Use Convert on the book page to voice it.', { base: base });
 }
 function chapterVoiceLabel(c) {
   const vs = chapterVoices(c);
@@ -3231,10 +3238,11 @@ function drawNote() {
   else if (state[cur] === 'todo') {
     const other = (c.renditions || []).length;
     const vn = selVoiceName();
-    n.textContent = other ? 'Not converted in this voice yet' + (vn ? ' (' + vn + ')' : '')
-                            + '. Pick another voice above, or convert it in this one.'
-                          : 'Not voiced yet. Use Convert to voice it'
-                            + (vn ? ' in ' + vn : '') + '.';
+    n.textContent = other
+      ? (vn ? T('Not converted in this voice yet ({voice}). Pick another voice above, or convert it in this one.', { voice: vn })
+            : T('Not converted in this voice yet. Pick another voice above, or convert it in this one.'))
+      : (vn ? T('Not voiced yet. Use Convert to voice it in {voice}.', { voice: vn })
+            : T('Not voiced yet. Use Convert to voice it.'));
   }
 }
 async function loadText(idx) {
@@ -3746,7 +3754,7 @@ $('#ssavemeta').onclick = async () => {
   $('#err').textContent = '';
   const title = ($('#stitlein').value || '').trim();
   const author = ($('#sauthorin').value || '').trim();
-  if (!title) { fail(failure('A book needs a title.')); return; }
+  if (!title) { fail(failure(T('A book needs a title.'))); return; }
   busy(T('Saving the details…'));
   try {
     await jpost('/book/meta', { book: book.id, title, author });
@@ -3777,7 +3785,7 @@ function renderSettings() {
   const note = $('#smetanote');
   note.hidden = !locked;
   note.textContent = locked
-    ? 'These came from the ISBN. Press Edit to change them; your version then wins over any future lookup.'
+    ? T('These came from the ISBN. Press Edit to change them; your version then wins over any future lookup.')
     : '';
   renderSeries();
   $('#scovrmbtn').hidden = !(book && book.cover);
@@ -3814,7 +3822,8 @@ function renderCopies() {
     $('#scopiesall').hidden = true;
     return;
   }
-  note.textContent = vs.length === 1 ? '1 voice on this book.' : vs.length + ' voices on this book.';
+  note.textContent = vs.length === 1 ? T('1 voice on this book.')
+    : T('{n} voices on this book.', { n: vs.length });
   vs.forEach(v => {
     const row = document.createElement('div');
     row.className = 'setrow'; row.style.alignItems = 'center';
@@ -3825,11 +3834,11 @@ function renderCopies() {
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'btn quiet'; btn.textContent = 'Remove';
     btn.onclick = async () => {
-      if (!confirm('Remove the ' + rlabel(v) + ' copy? The book and its other voices stay.')) return;
+      if (!confirm(T('Remove the {voice} copy? The book and its other voices stay.', { voice: rlabel(v) }))) return;
       $('#err').textContent = ''; busy(T('Removing the voice…'));
       try { await jpost('/book/renditions/delete',
         { book: book.id, provider: v.provider, voice: v.voice, model: v.model });
-        await settingsReload('Removed the ' + rlabel(v) + ' copy.'); }
+        await settingsReload(T('Removed the {voice} copy.', { voice: rlabel(v) })); }
       catch (err) { fail(err); }
     };
     row.append(lab, btn); box.append(row);
@@ -3886,15 +3895,17 @@ $('#scovrmbtn').onclick = async () => {
 };
 $('#srmallbtn').onclick = async () => {
   if (!book) return;
-  if (!confirm('Remove every voice from ' + (book.title || 'this book') + '? The book and its text stay.')) return;
+  if (!confirm(T('Remove every voice from {book}? The book and its text stay.',
+    { book: book.title || T('this book') }))) return;
   $('#err').textContent = ''; busy(T('Removing every voice…'));
   try { await jpost('/book/renditions/delete', { book: book.id, all: true });
-    await settingsReload('Removed every voice.'); }
+    await settingsReload(T('Removed every voice.')); }
   catch (err) { fail(err); }
 };
 $('#sdelbookbtn').onclick = async () => {
   if (!book) return;
-  if (!confirm('Remove ' + (book.title || 'this book') + ' from your library? Its voices go with it.')) return;
+  if (!confirm(T('Remove {book} from your library? Its voices go with it.',
+    { book: book.title || T('this book') }))) return;
   $('#err').textContent = ''; busy(T('Removing the book…'));
   try {
     await jpost('/book/delete', { book: book.id });
@@ -3953,7 +3964,7 @@ async function playSelection(bk, idx, autoplay = true) {
     idle(T('Not converted in this voice yet.')); return;
   }
   if (viewed) { state[idx] = cache.has(rd.audio_ref) ? 'ready' : 'down'; drawSpine(); }
-  busy((autoplay ? 'Downloading chapter ' : 'Loading chapter ') + (idx + 1) + '…');
+  busy(autoplay ? T('Downloading chapter {n}…', { n: idx + 1 }) : T('Loading chapter {n}…', { n: idx + 1 }));
   try {
     const e = await fetchChapter(bk.id, idx, rd.audio_ref, rd.audio_bytes, rd);
     const a = $('#audio'); a.src = e.url; bookSrc = a.src;
@@ -4004,6 +4015,7 @@ function sayState() {
       ? ($a.paused ? 'Paused. ' : 'Playing. ') : '') +
     player.title +
     (ch ? ', chapter ' + (ch.idx + 1) + ' of ' + total : '');
+}
 // step to the nearest chapter (in `dir`) that has audio in the current voice
 function chapterStep(dir) {
   if (!player.id || pcur < 0) return;
@@ -4293,7 +4305,7 @@ async function sbScanRun() {
 
 async function sbScanStep() {
   if (!sbScan) return;
-  if (sbScan.i >= sbScan.voices.length) { sbStopScan(true); sbStatus('Scan done.'); return; }
+  if (sbScan.i >= sbScan.voices.length) { sbStopScan(true); sbStatus(T('Scan done.')); return; }
   const v = sbScan.voices[sbScan.i];
   const label = v.label || v.id;
   $('#sbvoice').value = v.id;
@@ -4371,9 +4383,9 @@ window.addEventListener('appinstalled', () => {
 function installHint() {
   const ua = navigator.userAgent || '';
   const iOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  if (iOS) return 'Tap Share (the square with the up arrow), then Add to Home Screen.';
-  if (/Firefox\//.test(ua)) return 'Open the browser menu, then Add to home screen.';
-  return 'Open the browser menu, then Install app or Add to Home screen.';
+  if (iOS) return T('Tap Share (the square with the up arrow), then Add to Home Screen.');
+  if (/Firefox\//.test(ua)) return T('Open the browser menu, then Add to home screen.');
+  return T('Open the browser menu, then Install app or Add to Home screen.');
 }
 {
   const b = $('#menuinstall');
@@ -4384,7 +4396,7 @@ function installHint() {
       INSTALL.prompt(); try { await INSTALL.userChoice; } catch (_) {}
       INSTALL = null; b.hidden = true; return;
     }
-    toast('ok', 'Add fireside to your home screen. ' + installHint());
+    toast('ok', T('Add fireside to your home screen.') + ' ' + installHint());
   };
 }
 // The system player (lockscreen, notification shade, headset buttons) reads this.
