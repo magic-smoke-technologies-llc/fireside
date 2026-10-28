@@ -86,6 +86,18 @@ class SecondFactorOverHTTP(unittest.TestCase):
         return info, out
 
     # ---- the admin is forced, everyone else may opt in ----------------
+    def test_status_with_no_session_is_an_empty_answer_not_a_refusal(self):
+        # the page asks /2fa on every load, before it can know whether anyone
+        # is signed in. A 401 there put a console error on a stranger's page, so
+        # the honest answer is the empty state, the same shape /me gives.
+        s, st = self._jget("/2fa")
+        self.assertEqual(s, 200)
+        self.assertEqual(st["twofa"], "")
+        self.assertFalse(st["enrolled"])
+        self.assertFalse(st["required"])
+        # and it stays an empty answer: nothing here mints authority
+        self.assertEqual(self._status(200), 401)
+
     def test_the_first_account_is_not_walled_on_first_run(self):
         # your own box, your own door: nothing is forced on the only account
         # there is, and the panel says so instead of pretending it is optional.

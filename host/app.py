@@ -2683,6 +2683,12 @@ PUBLIC_ROUTES = {"/", "/index.html", "/i18n.js", "/favicon.ico", "/health", "/au
                  "/auth/policy", "/auth/forgot", "/auth/reset", "/me", "/plans",
                  "/privacy", "/terms", "/delete-account",
                  "/manifest.webmanifest", "/sw.js",
+                 # The page asks /2fa on every load, before it can know whether
+                 # a session exists. Answering 401 there put a console error on
+                 # a signed-out visitor's page and on the very screen that is
+                 # asking them to sign in. With no session the honest answer is
+                 # an empty state, the same shape /me gives, so it is public.
+                 "/2fa",
                  "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
 
 # What a half-session may still reach: the screen that finishes the factor,

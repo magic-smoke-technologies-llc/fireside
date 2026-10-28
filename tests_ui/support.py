@@ -299,7 +299,42 @@ class BrowserTest(unittest.TestCase):
         self.page.fill("#lockuser", username)
         self.page.fill("#lockpass", password)
         self.page.click("#lockgo")
+        self.finish_enrol_wall()
         self.wait_in_app()
+
+    def finish_enrol_wall(self):
+        """Finish a forced enrolment if this login landed on one.
+
+        An administrator signing in to a box that has more than one account is
+        held at the wall: the first-account skip ends the moment a second
+        account exists. The wall shows the key, so a test can prove a code from
+        it and take the codes screen's button, which is the only way onward.
+        Returns True when a wall was there.
+        """
+        wait_until(self.page, "() => document.body.classList.contains('locked') === false"
+                              " || (!!document.querySelector('#twofadlg')"
+                              " && !document.querySelector('#twofadlg').hidden"
+                              " && (document.querySelector('#twofasecret') || {}).textContent"
+                              "     .replace(/\\s/g, '').length > 8)")
+        if not self.page.evaluate(
+                "() => !!(document.querySelector('#twofadlg')"
+                " && !document.querySelector('#twofadlg').hidden)"):
+            return False
+        secret = self.page.text_content("#twofasecret").replace(" ", "").strip()
+        self.page.fill("#twofainput", self.totp_code(secret))
+        self.page.click("#twofago")
+        # the codes screen replaces the dialog's body, so its button is not the
+        # one that confirms; press it and the page has to leave the lock behind
+        wait_visible(self.page, "#twofadlg #twofaerr button")
+        self.page.click("#twofadlg #twofaerr button")
+        return True
+
+    def totp_code(self, secret):
+        """The code a phone would show now, from the key the page displayed."""
+        if REPO not in sys.path:
+            sys.path.insert(0, REPO)
+        from host import totp
+        return totp.totp(secret, at=time.time())
 
     def sign_out(self):
         self.page.click("#avatar")
