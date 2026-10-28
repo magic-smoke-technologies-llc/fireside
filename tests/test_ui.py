@@ -315,6 +315,10 @@ class TestClaimEndpoints(unittest.TestCase):
 
     def test_describe_and_confirm(self):
         token = self._seed_collision()
+        # a second account, so the first one is not the only account on the box
+        # and the admin rule is not deferred (bootstrap_skip)
+        from host import auth as _auth
+        _auth.local_register(self.app.conn, "sam", "hunter2hunter2")
         s, d = self._get("/auth/claim?token=" + token)
         self.assertEqual(s, 200)
         self.assertEqual(d["provider"], "microsoft")

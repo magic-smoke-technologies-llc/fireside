@@ -2468,6 +2468,8 @@ async function loadTwofa() {
   if (on) {
     box.textContent = 'On. ' + (st.recovery_left || 0) + ' recovery code(s) left.'
       + (st.required ? ' Administrator accounts must keep this on.' : '');
+  } else if (st.deferred) {
+    box.textContent = T('Off. This is the only account on this server, so nothing forces it yet. Turn it on and every login asks for a code; once a second account exists, it is required.');
   } else if (st.required) {
     box.textContent = T('Required for this account: an administrator always carries a second factor.');
   } else {
