@@ -11,6 +11,7 @@ so a bare `def test_x()` is collected by nothing and reports nothing.
 import json
 import os
 import pathlib
+import re
 import tempfile
 import threading
 import unittest
@@ -129,7 +130,23 @@ class TestSpanishPage(unittest.TestCase):
     def test_a_tooltip_is_translated_too(self):
         status, body = self.get("/?lang=es")
         assert status == 200
-        assert 'title="Capítulo anterior"' in body
+        # `title="Capítulo anterior"` alone passed while the English title was
+        # still on the tag in front of it: two identical attributes, and a
+        # browser keeps the first. So the tag is checked, not the substring.
+        tag = re.search(r'<[^>]*data-t-title="Previous chapter"[^>]*>', body)
+        assert tag, "no marked tag for the previous-chapter tooltip"
+        titles = re.findall(r'(?<!-)\btitle="([^"]*)"', tag.group(0))
+        assert titles == ["Capítulo anterior"], titles
+
+    def test_no_tag_has_two_of_the_same_attribute(self):
+        # A duplicate attribute is invalid HTML and the browser silently keeps
+        # the first, which is how a translated aria-label ships as English.
+        for path in ("/", "/?lang=es"):
+            status, body = self.get(path)
+            assert status == 200
+            for m in re.finditer(r"<[a-zA-Z][^>]*>", body):
+                names = re.findall(r"(?<=\s)([a-zA-Z-]+)=", m.group(0))
+                assert len(names) == len(set(names)), (path, m.group(0)[:120])
 
     def test_english_is_still_the_default(self):
         status, body = self.get("/")

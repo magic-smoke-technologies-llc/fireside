@@ -12,13 +12,70 @@
 <meta name="apple-mobile-web-app-title" content="fireside">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <style>
+  /* One palette, four ways of reading it. Every colour in this file goes
+     through these tokens, so a theme is a token block and nothing else.
+     `--faint` was #7d7364 and measured 4.04:1 on --bg and 3.42:1 on --raise,
+     under AA for body text, and it is what the helper lines are set in. */
   :root{
     --bg:#14110f; --surface:#1d1915; --raise:#272119; --line:#3a3128;
-    --text:#ece3d3; --soft:#b3a794; --faint:#7d7364;
+    --text:#ece3d3; --soft:#b3a794; --faint:#978c7a;
     --flame:#e3a857; --on-flame:#241808; --ready:#9bb58f; --warn:#e2917f;
     --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
     --ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+    --ring:var(--flame);
   }
+  /* Light: paper, not a washed-out dark theme. */
+  [data-theme="light"]{
+    --bg:#f7f3ec; --surface:#fffdf8; --raise:#efe9df; --line:#d3c9b9;
+    --text:#221e1a; --soft:#57503f; --faint:#6f6759;
+    --flame:#8a5a12; --on-flame:#fff8ec; --ready:#2f6b3a; --warn:#9c3527;
+    --ring:#8a5a12;
+  }
+  /* High contrast: full white on black, and the two states are told apart by
+     lightness as well as hue, because colour alone is the thing some readers
+     cannot use. Ready is the brightest, not-a-state is the flame. */
+  [data-theme="hc"]{
+    --bg:#000000; --surface:#0b0b0b; --raise:#1a1a1a; --line:#8a8a8a;
+    --text:#ffffff; --soft:#e6e6e6; --faint:#c8c8c8;
+    --flame:#ffd400; --on-flame:#000000; --ready:#e6f2ff; --warn:#d2670a;
+    --ring:#ffd400;
+  }
+  /* No theme chosen: follow the machine. Light scheme, then high contrast,
+     because a reader who asked for more contrast meant it. */
+  @media (prefers-color-scheme:light){
+    :root:not([data-theme]){
+      --bg:#f7f3ec; --surface:#fffdf8; --raise:#efe9df; --line:#d3c9b9;
+      --text:#221e1a; --soft:#57503f; --faint:#6f6759;
+      --flame:#8a5a12; --on-flame:#fff8ec; --ready:#2f6b3a; --warn:#9c3527;
+      --ring:#8a5a12;
+    }
+  }
+  @media (prefers-contrast:more){
+    :root:not([data-theme]){
+      --bg:#000000; --surface:#0b0b0b; --raise:#1a1a1a; --line:#8a8a8a;
+      --text:#ffffff; --soft:#e6e6e6; --faint:#c8c8c8;
+      --flame:#ffd400; --on-flame:#000000; --ready:#e6f2ff; --warn:#d2670a;
+      --ring:#ffd400;
+    }
+  }
+  /* High contrast also thickens what carries meaning: borders, focus. */
+  [data-theme="hc"] .btn,[data-theme="hc"] .bk .cover{border-width:2px}
+  [data-theme="hc"] .spine i{border-width:2.5px}
+  @media (prefers-contrast:more){
+    :root:not([data-theme]) .spine i{border-width:2.5px}
+  }
+  /* Visible focus everywhere, on every theme. `:focus-visible` so a mouse
+     click does not leave a ring, a keyboard tab always does. The ring is its own
+     token because in high contrast flame on black is loud and a ring needs to
+     read as a ring, not as part of the control. */
+  /* Announced by a screen reader, never drawn. */
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  /* Skip link: first thing Tab hits, off-screen until it has focus. */
+  .skip{position:absolute;left:8px;top:-60px;z-index:100;background:var(--raise);color:var(--text);
+    border:2px solid var(--flame);border-radius:8px;padding:10px 16px;font:600 14px/1 var(--ui);
+    text-decoration:none}
+  .skip:focus{top:8px}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 var(--ui)}
   header{padding:16px 22px 0;border-bottom:1px solid var(--line)}
@@ -48,7 +105,7 @@
   .small{font-size:13px;color:var(--soft)}
   .faint{color:var(--faint)}
   button,input,select,textarea{font:inherit;color:inherit}
-  :focus-visible{outline:2px solid var(--flame);outline-offset:2px}
+  :focus-visible{outline:3px solid var(--ring);outline-offset:2px;border-radius:4px}
   input,select{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
   label{display:block;font-size:12px;color:var(--faint);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.6px}
   .btn{background:var(--flame);color:var(--on-flame);border:0;border-radius:999px;padding:10px 22px;font-weight:600;font-size:15px;cursor:pointer}
@@ -68,7 +125,7 @@
   .spine i.ready{background:var(--ready);border-color:var(--ready)}
   .spine i.avail{border-color:var(--flame)}
   .spine i.down{border-color:var(--ready);background:linear-gradient(0deg,var(--ready) 50%,transparent 50%)}
-  .spine i.voice{border-color:var(--flame);animation:p 1.4s ease-in-out infinite}
+  .spine i.voice{border-color:var(--flame);border-style:dotted;animation:p 1.4s ease-in-out infinite}
   .spine i.fail{border-color:var(--warn);background:repeating-linear-gradient(45deg,var(--warn) 0 2px,transparent 2px 4px)}
   .spine i.miss{border:1.5px dashed var(--warn)}
   .spine i.cur{box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--flame)}
@@ -301,6 +358,24 @@
   .smeta .desc{white-space:pre-wrap;margin-top:8px}
 </style>
 <script>
+/* Theme, before first paint. A theme applied after the page renders is a flash of
+   the wrong theme, which is worse than no theme for a reader who needs the
+   contrast. Nothing chosen (or no storage) leaves the attribute off and the CSS
+   media queries decide: light scheme, then prefers-contrast. */
+(function () {
+  var root = document.documentElement;
+  var pick = null;
+  try { pick = localStorage.getItem('fs.theme'); } catch (e) {}
+  if (pick === 'light' || pick === 'dark' || pick === 'hc') {
+    root.setAttribute('data-theme', pick);
+    var dark = pick === 'dark';
+    root.style.colorScheme = dark ? 'dark' : 'light';
+    var m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute('content', pick === 'hc' ? '#000000' : (dark ? '#14110f' : '#f7f3ec'));
+  }
+})();
+</script>
+<script>
 /* Fireside native bridge hook. In the Android shell, window.NativeMedia raises a
    foreground media service so playback survives screen lock / backgrounding.
    Absent in a plain browser, so this is a harmless no-op there. */
@@ -317,6 +392,7 @@
 </script>
 </head>
 <body class="locked">
+<a class="skip" href="#main" data-t="Skip to content">Skip to content</a>
 <div class="lock" id="lock" hidden>
   <form class="card" id="lockform" autocomplete="on" novalidate>
     <div class="mark" data-t="fireside">fireside</div>
@@ -342,7 +418,7 @@
     <button class="btn" id="lockgo" type="submit" data-t="Sign in">Sign in</button>
     <p class="err" id="autherr" role="alert" aria-live="polite"></p>
     <button class="toggle" id="lockforgot" type="button" hidden data-t="Forgot password?">Forgot password?</button>
-    <button class="toggle" id="locktoggle" type="button" hidden></button>
+    <button class="toggle" id="locktoggle" type="button" aria-label="Switch between signing in and creating an account" data-t-aria="Switch between signing in and creating an account" hidden></button>
     <button class="toggle" id="lockplans" type="button" data-t="See plans &amp; pricing →">See plans &amp; pricing →</button>
     <a class="toggle" href="/privacy" target="_blank" rel="noopener" style="text-decoration:none" data-t="Privacy">Privacy</a>
     <a class="toggle" href="/terms" target="_blank" rel="noopener" style="text-decoration:none" data-t="Terms">Terms</a>
@@ -367,14 +443,14 @@
       <div class="menu" id="alertmenu" hidden></div>
     </div>
   </div>
-  <nav class="tabs" id="tabs">
-    <button data-v="lib" class="on" data-t="Library">Library</button>
+  <nav class="tabs" id="tabs" aria-label="Sections" data-t-aria="Sections">
+    <button data-v="lib" class="on" aria-current="page" data-t="Library">Library</button>
     <button data-v="play" data-t="Now playing">Now playing</button>
     <button data-v="sand" data-t="Try a voice">Try a voice</button>
     <button data-v="plans" data-t="Plans">Plans</button>
   </nav>
 </header>
-<main>
+<main id="main" tabindex="-1">
   <!-- library -->
   <section class="view on" id="v-lib">
     <div id="resume" class="resume"></div>
@@ -408,12 +484,12 @@
     <p class="small" id="shelflabel" style="margin:34px 0 0;display:none" data-t="On your shelf">On your shelf</p>
     <div class="shelf" id="shelf"></div>
     <p class="small" id="libempty" style="color:var(--faint)" data-t="Nothing here yet. Add a book to start.">Nothing here yet. Add a book to start.</p>
-    <div class="legend" id="legend" style="display:none">
-      <span><span class="spine"><i class="ready"></i></span>on this device</span>
-      <span><span class="spine"><i class="avail"></i></span>voiced, not here</span>
-      <span><span class="spine"><i class="voice"></i></span>being voiced</span>
-      <span><span class="spine"><i class="fail"></i></span>check failed</span>
-      <span><span class="spine"><i></i></span>not voiced yet</span>
+    <div class="legend" id="legend" style="display:none" aria-hidden="false">
+      <span><span class="spine" aria-hidden="true"><i class="ready"></i></span>on this device</span>
+      <span><span class="spine" aria-hidden="true"><i class="avail"></i></span>voiced, not here</span>
+      <span><span class="spine" aria-hidden="true"><i class="voice"></i></span>being voiced</span>
+      <span><span class="spine" aria-hidden="true"><i class="fail"></i></span>check failed</span>
+      <span><span class="spine" aria-hidden="true"><i></i></span>not voiced yet</span>
     </div>
   </section>
 
@@ -487,7 +563,7 @@
   <section class="view" id="v-set">
     <h2 data-t="Settings">Settings</h2>
     <p class="sub" data-t="Voice servers and source logins live on this server. Keys never reach your browser.">Voice servers and source logins live on this server. Keys never reach your browser.</p>
-    <nav class="tabs settabs" id="settabs">
+    <nav class="tabs settabs" id="settabs" aria-label="Settings sections" data-t-aria="Settings sections">
       <button data-p="voice" class="on" data-t="Voice">Voice</button>
       <button data-p="reading" data-t="Reading">Reading</button>
       <button data-p="words" data-t="Words">Words</button>
@@ -577,6 +653,16 @@
       <p class="sub" data-t="The app's own words. Books stay in the language they were written in.">The app's own words. Books stay in the language they were written in.</p>
       <label for="langsel" data-t="Interface language">Interface language</label>
       <select id="langsel" style="max-width:320px"></select>
+      <h3 style="margin-top:24px" data-t="Display">Display</h3>
+      <p class="sub" data-t="Contrast and colour. Stored in this browser, so each device can differ.">Contrast and colour. Stored in this browser, so each device can differ.</p>
+      <label for="themesel" data-t="Theme">Theme</label>
+      <select id="themesel" style="max-width:320px">
+        <option value="" data-t="Follow this device">Follow this device</option>
+        <option value="light" data-t="Light">Light</option>
+        <option value="dark" data-t="Dark">Dark</option>
+        <option value="hc" data-t="High contrast">High contrast</option>
+      </select>
+      <p class="hint" data-t="High contrast uses white on black with thicker borders, and the status marks are told apart by shape as well as colour.">High contrast uses white on black with thicker borders, and the status marks are told apart by shape as well as colour.</p>
       <h3 style="margin-top:24px" data-t="Password">Password</h3>
       <p class="sub" id="pwsub" data-t="The password you sign in with.">The password you sign in with.</p>
       <div id="pwcurrentrow">
@@ -708,18 +794,19 @@
   <div class="err" id="err"></div>
   <audio id="audio" preload="metadata"></audio>
 </main>
-<div id="ribbon" class=""><span class="spin" id="rspin" style="display:none"></span><span class="rtext" id="rtext"></span><span class="rtime" id="rtime"></span><span class="rprog" id="rprog"><i id="rprogfill"></i></span><button class="rbtn" id="rcancel" type="button" hidden data-t="Cancel">Cancel</button><button class="rbtn" id="rdismiss" type="button" hidden data-t="Dismiss">Dismiss</button></div>
-<div id="toasts"></div>
+<div id="ribbon" class="" role="status" aria-live="polite"><span class="spin" id="rspin" style="display:none"></span><span class="rtext" id="rtext"></span><span class="rtime" id="rtime"></span><span class="rprog" id="rprog"><i id="rprogfill"></i></span><button class="rbtn" id="rcancel" type="button" hidden data-t="Cancel">Cancel</button><button class="rbtn" id="rdismiss" type="button" hidden data-t="Dismiss">Dismiss</button></div>
+<div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
 <button id="selplay" type="button" hidden style="position:fixed;z-index:60;padding:8px 14px;border-radius:999px;border:1px solid #3a3f47;background:#191c22;color:#eceff3;font:inherit;font-size:13px;box-shadow:0 8px 22px rgba(0,0,0,.45);cursor:pointer" data-t="▶ Play from here">▶ Play from here</button>
-<div id="transport">
+<div id="transport" role="region" aria-label="Player" data-t-aria="Player">
   <button class="tnav" id="tprev" type="button" title="Previous chapter" data-t-title="Previous chapter" aria-label="Previous chapter" data-t-aria="Previous chapter">⏮</button>
-  <button class="tnav" id="tback" type="button" title="Back 15 seconds" data-t-title="Back 15 seconds">−15s</button>
+  <button class="tnav" id="tback" type="button" title="Back 15 seconds" data-t-title="Back 15 seconds" aria-label="Back 15 seconds" data-t-aria="Back 15 seconds">−15s</button>
   <button class="tplay" id="tplay" type="button" aria-label="Play" data-t-aria="Play">▶</button>
-  <button class="tnav" id="tfwd" type="button" title="Forward 15 seconds" data-t-title="Forward 15 seconds">+15s</button>
+  <button class="tnav" id="tfwd" type="button" title="Forward 15 seconds" data-t-title="Forward 15 seconds" aria-label="Forward 15 seconds" data-t-aria="Forward 15 seconds">+15s</button>
   <button class="tnav" id="tnext" type="button" title="Next chapter" data-t-title="Next chapter" aria-label="Next chapter" data-t-aria="Next chapter">⏭</button>
   <button class="tq" id="tqueue" type="button" title="Queue" data-t-title="Queue" aria-label="Queue" data-t-aria="Queue">☰</button>
   <span class="tnow" id="tnowbook"></span>
-  <span class="ttime" id="ttimes"></span>
+  <span class="ttime" id="ttimes" aria-hidden="true"></span>
+  <span class="sr-only" id="tstatus" role="status" aria-live="polite"></span>
   <label class="vol" title="Volume" data-t-title="Volume">Vol<input id="tvol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" data-t-aria="Volume"></label>
 </div>
 <div id="queuedrawer" hidden>
@@ -980,6 +1067,9 @@ function fail(e) { clearInterval(_tick); $('#rcancel').hidden = true; $('#rspin'
   toast('bad', msg); bellRaise(); }
 function toast(kind, text) {
   const t = document.createElement('div'); t.className = 'toast ' + (kind || '');
+  // A failure is the only copy of what went wrong, so it interrupts; a
+  // confirmation can wait its turn behind whatever is being read.
+  if (kind === 'bad') t.setAttribute('role', 'alert');
   const s = document.createElement('span'); s.textContent = text; t.append(s);
   const x = document.createElement('button'); x.type = 'button'; x.className = 'x';
   x.textContent = '×'; x.title = 'Dismiss'; x.setAttribute('aria-label', 'Dismiss');
@@ -1030,7 +1120,10 @@ function needUser() { if (!USER) { fail('set your name first (top right)'); thro
 // --- views -----------------------------------------------------------------
 function show(v) {
   document.querySelectorAll('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  /* A bare list of buttons does not tell a screen reader which one is current,
+     so the active tab carries aria-current as well as the `.on` class. */
+  document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.v === v;
+    b.classList.toggle('on', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   if (v === 'set') { loadPron(); loadLinked(); loadSessions(); loadPlan(); loadPasswordPanel();
     loadDanger(); setSetTab(localStorage.getItem(SETTAB_KEY)); }
   if (v === 'plans') loadPlansPage();
@@ -1046,7 +1139,8 @@ function setSetTab(p) {
   const bar = $('#settabs'); if (!bar) return;
   let btn = p ? bar.querySelector(`button[data-p="${p}"]`) : null;
   if (!btn || btn.hidden) { p = 'voice'; btn = bar.querySelector('button[data-p="voice"]'); }
-  bar.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
+  bar.querySelectorAll('button').forEach(b => { b.classList.toggle('on', b === btn);
+    if (b === btn) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   document.querySelectorAll('#v-set .setpanel').forEach(el => el.classList.toggle('on', el.dataset.p === p));
   try { localStorage.setItem(SETTAB_KEY, p); } catch (_) {}
   if (p === 'plan') loadCredits();
@@ -1065,6 +1159,25 @@ if ($('#settabs')) document.querySelectorAll('#settabs button').forEach(b => b.o
     '<option value="' + l.code + '"' + (l.code === I.locale ? ' selected' : '') + '>' +
     (l.dir === 'rtl' ? l.name + ' (RTL)' : l.name) + '</option>').join('');
   sel.onchange = () => I.setLocale(sel.value);
+})();
+
+// --- display: theme -------------------------------------------------------
+/* The attribute is already set before paint by the inline head script; this
+   only wires the control to it. Stored per browser on purpose: contrast is a
+   property of the screen you are sitting at, not of the account. */
+(function () {
+  const sel = $('#themesel'); if (!sel) return;
+  let picked = ''; try { picked = localStorage.getItem('fs.theme') || ''; } catch (_) {}
+  sel.value = picked;
+  sel.onchange = () => {
+    const v = sel.value;
+    try { v ? localStorage.setItem('fs.theme', v) : localStorage.removeItem('fs.theme'); } catch (_) {}
+    const root = document.documentElement;
+    if (v) root.setAttribute('data-theme', v); else root.removeAttribute('data-theme');
+    root.style.colorScheme = v === 'light' ? 'light' : (v ? 'dark' : '');
+    const m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute('content', v === 'hc' ? '#000000' : (v === 'light' ? '#f7f3ec' : '#14110f'));
+  };
 })();
 
 // --- settings: voice servers, kept on the server ---------------------------
@@ -3865,7 +3978,21 @@ function updateTransport() {
   document.body.classList.toggle('hastransport', on);
   const lbl = $('#tnowbook');
   if (lbl) lbl.textContent = on ? (player.title + (pcur >= 0 ? ' · ch ' + (pcur + 1) : '')) : '';
+  sayState();
 }
+/* What a sighted reader gets from the transport bar - this book, this chapter,
+   playing or paused - a screen reader only gets if it is written down. It is
+   updated on chapter changes and on play/pause, never on timeupdate: a clock
+   that talks every second is worse than silence. */
+function sayState() {
+  const box = $('#tstatus'); if (!box) return;
+  if (!player.id) { box.textContent = ''; return; }
+  const ch = player.chapters.filter(c => c.idx === pcur)[0];
+  const total = player.chapters.length;
+  box.textContent = (pcur >= 0 && player.chapters.filter(c => c.idx === pcur).length
+      ? ($a.paused ? 'Paused. ' : 'Playing. ') : '') +
+    player.title +
+    (ch ? ', chapter ' + (ch.idx + 1) + ' of ' + total : '');
 // step to the nearest chapter (in `dir`) that has audio in the current voice
 function chapterStep(dir) {
   if (!player.id || pcur < 0) return;
@@ -3892,9 +4019,9 @@ $('#tog').onclick = () => { if (!player.id || pcur < 0) return; $a.paused ? $a.p
 $('#back30').onclick = () => { $a.currentTime = Math.max(0, ($a.currentTime || 0) - 15); };
 const SPD = [1.0, 1.1, 1.25, 1.5]; let si = 1;
 $('#speed').onclick = () => { si = (si + 1) % SPD.length; $a.playbackRate = SPD[si]; $('#speed').textContent = SPD[si] + '×'; };
-$a.addEventListener('play', () => { syncTog(); listenStart();
+$a.addEventListener('play', () => { syncTog(); listenStart(); sayState();
   if ('mediaSession' in navigator) { try { navigator.mediaSession.playbackState = 'playing'; } catch (_) {} } });
-$a.addEventListener('pause', () => { syncTog(); listenStop();
+$a.addEventListener('pause', () => { syncTog(); listenStop(); sayState();
   if ('mediaSession' in navigator) { try { navigator.mediaSession.playbackState = 'paused'; } catch (_) {} } });
 $a.addEventListener('timeupdate', () => {
   setPositionState();
