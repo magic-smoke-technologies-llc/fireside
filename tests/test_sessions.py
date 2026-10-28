@@ -18,6 +18,7 @@ from host import auth
 from host.app import App, make_handler
 from tests.test_app import READER_BODY, SPEECH_BODY, STORAGE_BODY
 from tests.test_pluginhost import write_plugin
+from tests import twofa_support
 
 
 def _request(path, obj=None, port=0, ua=None):
@@ -68,12 +69,21 @@ class TestSessions(unittest.TestCase):
             return r.status, json.loads(r.read())
 
     def _register(self, op, name="chris", ua=None):
-        self._post(op, "/auth/local/register",
-                   {"username": name, "password": "longenough"}, ua=ua)
+        # the first account is an administrator, so it always owes a factor.
+        # Clearing it here keeps every other test in this file about sessions.
+        with self._post(op, "/auth/local/register",
+                        {"username": name, "password": "longenough"}, ua=ua) as r:
+            out = json.loads(r.read())
+        if out.get("admin"):
+            twofa_support.enrol(
+                lambda path, obj: self._jpost(op, path, obj, ua=ua)[1], name)
 
     def _login(self, op, name="chris", ua=None):
         self._post(op, "/auth/local/login",
                    {"username": name, "password": "longenough"}, ua=ua)
+        if name in twofa_support.SECRETS:
+            twofa_support.finish(
+                lambda path, obj: self._jpost(op, path, obj, ua=ua)[1], name)
 
     def test_sessions_lists_devices_and_flags_the_current_one(self):
         a = _browser()

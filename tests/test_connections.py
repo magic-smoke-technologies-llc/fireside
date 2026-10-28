@@ -22,6 +22,7 @@ from http.server import ThreadingHTTPServer
 from host.app import App, make_handler
 from tests.test_app import READER_BODY, STORAGE_BODY
 from tests.test_pluginhost import write_plugin
+from tests import twofa_support
 
 # A speech provider with one secret field and one open field, so redaction and
 # override have something to act on. synth echoes the resolved secret and region
@@ -77,8 +78,14 @@ class ConnBase(unittest.TestCase):
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
     def signup(self, b, u="chris", p="longenough"):
+        # the first account is an administrator, and an administrator now always
+        # owes a factor: enrol it so the rest of the suite is about connections.
         with b.open(_req("/auth/local/register", {"username": u, "password": p}, self.port)) as r:
-            return json.loads(r.read())
+            out = json.loads(r.read())
+        if out.get("admin"):
+            twofa_support.enrol(
+                lambda path, obj: self.post(b, path, obj), u)
+        return out
 
     def post(self, b, path, obj):
         with b.open(_req(path, obj, self.port)) as r:

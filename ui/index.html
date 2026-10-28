@@ -2353,16 +2353,16 @@ async function loadTwofa() {
   $('#twofamessage').textContent = '';
   if (on) {
     box.textContent = 'On. ' + (st.recovery_left || 0) + ' recovery code(s) left.'
-      + (st.required ? ' This server requires it for administrators.' : '');
+      + (st.required ? ' Administrator accounts must keep this on.' : '');
   } else if (st.required) {
-    box.textContent = 'Required for this account, because this server requires it for administrators.';
+    box.textContent = 'Required for this account: an administrator always carries a second factor.';
   } else {
     box.textContent = 'Off.';
   }
   const offBtn = $('#twofaoffbtn');
   if (offBtn) {
     offBtn.disabled = !!st.required;
-    offBtn.textContent = st.required ? 'Required by this server' : 'Turn off two-factor';
+    offBtn.textContent = st.required ? 'Required for administrators' : 'Turn off two-factor';
   }
 }
 if ($('#twofastart')) $('#twofastart').onclick = () => {

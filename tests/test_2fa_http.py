@@ -32,10 +32,8 @@ def _req(path, obj, port):
 
 class SecondFactorOverHTTP(unittest.TestCase):
     def setUp(self):
-        # forced enrolment is a deployment switch; these tests are about the
-        # switch being ON, and tests/test_2fa.py covers the off case.
-        self._old = os.environ.get("FIRESIDE_REQUIRE_2FA")
-        os.environ["FIRESIDE_REQUIRE_2FA"] = "1"
+        # no environment switch here: an admin is forced by the code, so these
+        # tests would pass with any environment at all.
         self.tmp = tempfile.mkdtemp()
         root = os.path.join(self.tmp, "plugins")
         write_plugin(root, "reader", "fake", order=10, body=READER_BODY)
@@ -52,10 +50,6 @@ class SecondFactorOverHTTP(unittest.TestCase):
 
     def tearDown(self):
         self.httpd.shutdown()
-        if self._old is None:
-            os.environ.pop("FIRESIDE_REQUIRE_2FA", None)
-        else:
-            os.environ["FIRESIDE_REQUIRE_2FA"] = self._old
 
     def _post(self, path, obj):
         return self.browser.open(_req(path, obj, self.port))
@@ -223,22 +217,34 @@ class SecondFactorOverHTTP(unittest.TestCase):
         self.assertTrue(new["changing"])
         self.assertTrue(new["secret"])
 
-    def test_an_admin_can_switch_it_off_when_the_server_does_not_require_it(self):
-        # required = this deployment forces a factor; with the switch off the
-        # admin owns their own login and the panel must say so.
+    def test_an_admin_cannot_switch_it_off_even_with_a_good_code(self):
+        # an admin account always carries a factor, so this route has no way to
+        # quietly undo that. Refusing is not a lockout: change, recovery codes
+        # and tools/reset_2fa.py all keep a way in.
         uid = self._register("chris")
         info, _out = self._enrol()
-        old = os.environ.pop("FIRESIDE_REQUIRE_2FA", None)
-        try:
-            s, st = self._jget("/2fa")
-            self.assertFalse(st["required"])
-            self.assertTrue(st["can_disable"])
-            code = totp.totp(info["secret"], at=time.time() + 30)
-            with self._post("/2fa/disable", {"code": code}) as r:
-                self.assertEqual(r.status, 200)
-            self.assertFalse(auth.enrolled(self.app.conn, uid))
-        finally:
-            os.environ["FIRESIDE_REQUIRE_2FA"] = old if old is not None else "1"
+        s, st = self._jget("/2fa")
+        self.assertTrue(st["required"])
+        self.assertFalse(st["can_disable"])
+        code = totp.totp(info["secret"], at=time.time() + 30)
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._post("/2fa/disable", {"code": code})
+        self.assertEqual(ctx.exception.code, 403)
+        self.assertTrue(auth.enrolled(self.app.conn, uid))
+
+    def test_a_plain_user_can_switch_their_own_factor_off(self):
+        self._register("chris")
+        self._enrol()
+        self.jar.clear()
+        uid = self._register("sam")
+        info, _out = self._enrol()
+        s, st = self._jget("/2fa")
+        self.assertFalse(st["required"])
+        self.assertTrue(st["can_disable"])
+        code = totp.totp(info["secret"], at=time.time() + 30)
+        with self._post("/2fa/disable", {"code": code}) as r:
+            self.assertEqual(r.status, 200)
+        self.assertFalse(auth.enrolled(self.app.conn, uid))
 
     def test_a_half_session_can_still_sign_out(self):
         self._register("chris")

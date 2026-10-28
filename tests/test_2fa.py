@@ -53,15 +53,28 @@ class TwoFactorAtTheFold(unittest.TestCase):
                           "a pending session must not open anything")
         self.assertEqual(auth.pending_state(self.conn, tok), auth.PENDING_CODE)
 
-    def test_admin_is_not_forced_unless_the_deployment_says_so(self):
-        # off by default: a switch that locks the only admin out of a box whose
-        # 2FA screen has not shipped yet is not a feature, it is a trap.
+    def test_an_admin_is_always_asked_for_a_factor(self):
+        # no switch can put an admin account on one key: the admin can read
+        # every other account on the box. The half-session still lets them
+        # enrol, so being required is not being shut out.
         tok = auth.create_session(self.conn, self.root, "local")
-        self.assertEqual(auth.session_user(self.conn, tok), self.root)
+        self.assertIsNone(auth.session_user(self.conn, tok))
+        self.assertEqual(auth.pending_state(self.conn, tok), auth.PENDING_ENROLL)
 
-    def test_admin_without_enrolment_is_told_to_enrol(self):
+    def test_a_plain_user_is_never_forced_and_no_env_var_pretends_otherwise(self):
+        # FIRESIDE_REQUIRE_2FA used to gate admins and no longer gates anything.
+        # A setting that is read and ignored is worse than no setting: it reads
+        # green in a deploy check while the behaviour is someone else's decision.
+        tok = auth.create_session(self.conn, self.uid, "local")
+        self.assertEqual(auth.session_user(self.conn, tok), self.uid)
         os.environ["FIRESIDE_REQUIRE_2FA"] = "1"
         self.addCleanup(os.environ.pop, "FIRESIDE_REQUIRE_2FA", None)
+        tok = auth.create_session(self.conn, self.uid, "local")
+        self.assertEqual(auth.session_user(self.conn, tok), self.uid)
+        tok = auth.create_session(self.conn, self.root, "local")
+        self.assertIsNone(auth.session_user(self.conn, tok))
+
+    def test_admin_without_enrolment_is_told_to_enrol(self):
         tok = auth.create_session(self.conn, self.root, "local")
         self.assertIsNone(auth.session_user(self.conn, tok))
         self.assertEqual(auth.pending_state(self.conn, tok), auth.PENDING_ENROLL)
