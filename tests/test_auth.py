@@ -18,6 +18,7 @@ from host import auth
 from host.app import App, make_handler
 from tests.test_app import READER_BODY, SPEECH_BODY, STORAGE_BODY
 from tests.test_pluginhost import write_plugin
+from tests import twofa_support
 
 
 def _open(path, obj, port):
@@ -54,6 +55,20 @@ class TestAuth(unittest.TestCase):
         with self.browser.open("http://127.0.0.1:%d%s" % (self.port, path)) as r:
             return r.status, json.loads(r.read())
 
+    def _signup(self, name="chris"):
+        """Register the first account and clear its factor.
+
+        The first account is the administrator; an administrator always owes a
+        second factor, so a test that needs a live session has to finish one.
+        """
+        with self._post("/auth/local/register",
+                        {"username": name, "password": "longenough"}) as r:
+            out = json.loads(r.read())
+        if out.get("admin"):
+            twofa_support.enrol(
+                lambda path, obj: json.loads(self._post(path, obj).read()), name)
+        return out
+
     def test_a_session_gates_the_app(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             self.browser.open("http://127.0.0.1:%d/library?user=x" % self.port)
@@ -66,10 +81,7 @@ class TestAuth(unittest.TestCase):
         self.assertTrue(pol["registration_open"])
 
     def test_first_account_is_admin(self):
-        with self._post("/auth/local/register",
-                        {"username": "chris", "password": "longenough"}) as r:
-            self.assertEqual(r.status, 200)
-            self.assertTrue(json.loads(r.read())["admin"])
+        self.assertTrue(self._signup()["admin"])
         s, me = self._jget("/me")
         self.assertTrue(me["authenticated"])
         self.assertTrue(me["admin"])
@@ -87,7 +99,7 @@ class TestAuth(unittest.TestCase):
 
     def test_registration_can_close_and_the_first_account_is_still_let_in(self):
         # a stranger cannot be created once the admin closes the door
-        self._post("/auth/local/register", {"username": "chris", "password": "longenough"})
+        self._signup()
         with self._post("/auth/registration", {"open": False}) as r:
             self.assertEqual(r.status, 200)
         stranger = urllib.request.build_opener(
@@ -157,7 +169,7 @@ class TestAuth(unittest.TestCase):
         self.assertEqual(r.code, 401)
 
     def test_link_attaches_the_provider_to_the_signed_in_account(self):
-        self._post("/auth/local/register", {"username": "chris", "password": "longenough"})
+        self._signup()
         self._wire_fake_provider()
         r = self._get_no_redirect("http://127.0.0.1:%d/auth/fake/start?link=1" % self.port)
         self.assertEqual(r.code, 302)
@@ -236,7 +248,7 @@ class TestAuth(unittest.TestCase):
         self.assertIn("app=again", r.headers["Location"])
 
     def test_a_bad_state_is_refused(self):
-        self._post("/auth/local/register", {"username": "chris", "password": "longenough"})
+        self._signup()
         self._wire_fake_provider()
         self._get_no_redirect("http://127.0.0.1:%d/auth/fake/start?link=1" % self.port)
         r = self._get_no_redirect(

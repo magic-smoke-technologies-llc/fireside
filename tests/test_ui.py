@@ -323,8 +323,15 @@ class TestClaimEndpoints(unittest.TestCase):
                                   {"claim": token, "password": "hunter2hunter2"})
         self.assertEqual(s, 200)
         self.assertTrue(d["ok"])
-        s, me = self._get("/me", cookie=cookie)
-        self.assertTrue(me["authenticated"])
+        # the session it mints belongs to the first account, which is the
+        # administrator, and an administrator always owes a factor. So the door
+        # opens onto the enrolment screen, not onto /me.
+        try:
+            self._get("/me", cookie=cookie)
+            self.fail("an admin session without a factor must not open /me")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 401)
+            self.assertEqual(json.loads(e.read()).get("twofa"), "pending_enroll")
 
     def test_wrong_password_refuses(self):
         token = self._seed_collision()

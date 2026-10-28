@@ -387,28 +387,37 @@ def enrolled(conn, user_id):
     return bool(row and row["secret"] and int(row["confirmed_at"] or 0))
 
 
-def require_admins_on():
-    """Is forced enrolment for admins switched on for this deployment?
+def must_have_factor(conn, user_id):
+    """Is this account required to carry a second factor? An administrator is.
 
-    Off by default, on purpose: turning this on before a screen exists locks
-    the administrator out of their own box, and the only account that can fix
-    that is the one being locked out. So the switch is a deployment decision
-    made after the screen ships, not a constant in the source.
+    Not negotiable by a setting, and not negotiable by the account itself: an
+    admin can read every other account on the box, so that is the one login that
+    always gets a second key (Chris, 10-26: "Admins must ALWAYS have 2FA on.
+    Don't lock them out, but 2FA is required"). A setting could quietly leave an
+    admin on one key, which is exactly the account least able to afford it.
+
+    Required is not shut out. The half-session still reaches the enrol screen, a
+    recovery code finishes a login, changing the authenticator accepts one, and
+    tools/reset_2fa.py clears the factor from inside the container when both the
+    app and the codes are gone. That last one needs the deploy credentials, so
+    reaching it is itself a credential.
+
+    Everyone else stays optional for now; whether every account needs a factor
+    is Chris's call when sales open, and no flag here pretends otherwise.
     """
-    return str(os.environ.get("FIRESIDE_REQUIRE_2FA", "") or "").strip().lower() \
-        in ("1", "true", "yes", "on")
+    return bool(user_id) and is_admin(conn, user_id)
 
 
 def factor_for(conn, user_id):
     """What a session minted for this user right now has to be.
 
-    Optional for everyone, and for admins once FIRESIDE_REQUIRE_2FA is on - an
-    administrator can read every other account on the box, so that is the
-    account worth a second key.
+    Required for an administrator, always; optional for everyone else. An
+    admin can read every other account on the box, so that is the login worth a
+    second key.
     """
     if enrolled(conn, user_id):
         return PENDING_CODE
-    if is_admin(conn, user_id) and require_admins_on():
+    if must_have_factor(conn, user_id):
         return PENDING_ENROLL
     return FACTOR_OK
 

@@ -2220,12 +2220,13 @@ class App:
     def twofa_status(self, q, body):
         """What this session still owes, and what it may do about it.
 
-        `required` is the deployment forcing a factor on this account, not "this
-        account is an admin": with FIRESIDE_REQUIRE_2FA off an admin is free to
-        run without one, and the panel should not lie about that."""
+        `required` means this account must carry a factor: an administrator
+        always, everyone else when the deployment requires it. The panel says
+        what is true rather than what is allowed, so "can_disable" is false
+        exactly when a factor is not the account's own choice."""
         factor, uid = self._twofa_who(q)
         admin = bool(uid) and auth.is_admin(self.conn, uid)
-        forced = admin and auth.require_admins_on()
+        forced = auth.must_have_factor(self.conn, uid)
         return 200, {
             "twofa": factor if factor in auth.PENDING else "",
             "enrolled": auth.enrolled(self.conn, uid),
@@ -2319,17 +2320,24 @@ class App:
     def twofa_disable(self, q, body):
         """Turn the factor off, given a current code.
 
-        An administrator is refused only while the deployment forces a factor on
-        admins (FIRESIDE_REQUIRE_2FA). That is the server's rule and not mine to
-        hide: a blanket "admins may never turn this off" left the one account
-        that owns the box with no way back to a plain login.
+        An administrator is always refused: an admin account carries a factor,
+        full stop, and this is the route that would quietly undo that. Refusing
+        is not a lockout, because there are three ways back in that keep the
+        factor on: a recovery code finishes a login, changing the authenticator
+        accepts a recovery code as proof, and tools/reset_2fa.py clears the
+        factor from inside the container, after which the next login must enrol
+        again. A non-admin is refused only when the deployment requires a factor
+        of everyone.
         """
         factor, uid = self._twofa_who(q)
         if not uid or factor in auth.PENDING:
             return 401, {"error": "auth required"}
-        if auth.is_admin(self.conn, uid) and auth.require_admins_on():
-            return 403, {"error": "this server requires a second factor for "
-                                  "administrators (FIRESIDE_REQUIRE_2FA)"}
+        if auth.must_have_factor(self.conn, uid):
+            why = ("administrators must keep a second factor"
+                   if auth.is_admin(self.conn, uid)
+                   else "this server requires a second factor for every account")
+            return 403, {"error": why + "; you can change it, or use a recovery "
+                                       "code"}
         if not self._allow_attempt(uid, "disable"):
             return 429, {"error": "too many attempts"}
         b = body or {}
