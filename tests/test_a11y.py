@@ -81,7 +81,8 @@ def _resolve(tokens, key, depth=0):
     return v
 
 
-THEME_SELECTORS = [":root", '[data-theme="light"]', '[data-theme="hc"]']
+THEME_SELECTORS = [":root", '[data-theme="light"]', '[data-theme="hc"]',
+                  '[data-theme="cvd"]']
 
 
 class TestContrast(unittest.TestCase):
@@ -127,6 +128,94 @@ class TestContrast(unittest.TestCase):
             tokens = dict(root) if sel == ":root" else {**root, **own}
             faint_on_raise = _contrast(_resolve(tokens, "faint"), _resolve(tokens, "raise"))
             assert faint_on_raise >= AA_TEXT, "%s faint on raise = %.2f" % (sel, faint_on_raise)
+
+
+# Deuteranope and protanope simulation, Machado 2009 at severity 1.0, applied to
+# linear RGB. Not a claim that a simulation equals a person: it is enough to tell
+# whether a palette collapsed the two verdicts into one colour.
+DEUTERANOPIA = [[0.367322, 0.860646, -0.227968],
+                [0.280085, 0.672501, 0.047413],
+                [-0.011820, 0.042940, 0.968881]]
+PROTANOPIA = [[0.152286, 1.052583, -0.204860],
+              [0.114503, 0.786281, 0.099216],
+              [-0.003882, -0.048116, 1.051998]]
+
+# dE76. Ready and warn measured 10.0 / 7.4 in the default palette and 31.4 / 20.7
+# in the colour-vision-safe one, so 15 is the line the default fails by design.
+CVD_SEPARATION = 15.0
+
+
+def _linear(hexcolour):
+    h = hexcolour.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    out = []
+    for i in (0, 2, 4):
+        c = int(h[i:i + 2], 16) / 255
+        out.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+    return out
+
+
+def _lab(hexcolour, matrix=None):
+    r, g, b = _linear(hexcolour)
+    if matrix:
+        r, g, b = [max(0.0, min(1.0, sum(matrix[i][j] * v
+                    for j, v in enumerate((r, g, b))))) for i in range(3)]
+    x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+    f = lambda t: t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
+    fx, fy, fz = f(x), f(y), f(z)
+    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def _delta_e(a, b, matrix=None):
+    la, lb = _lab(a, matrix), _lab(b, matrix)
+    return sum((x - y) ** 2 for x, y in zip(la, lb)) ** 0.5
+
+
+def _theme_tokens(sel):
+    root = _tokens(_block(":root"))
+    own = _tokens(_block(sel))
+    return dict(root) if sel == ":root" else {**root, **own}
+
+
+class TestColourBlindness(unittest.TestCase):
+
+    def test_the_colour_vision_theme_keeps_the_verdicts_apart(self):
+        # Green against red is one colour to a deuteranope; this theme buys its
+        # separation from the blue/purple axis instead, and it has to hold under
+        # both simulations, not just the one that is easier.
+        tokens = _theme_tokens('[data-theme="cvd"]')
+        ready = _resolve(tokens, "ready")
+        warn = _resolve(tokens, "warn")
+        for name, matrix in [("deuteranopia", DEUTERANOPIA), ("protanopia", PROTANOPIA)]:
+            d = _delta_e(ready, warn, matrix)
+            assert d >= CVD_SEPARATION, "%s ready/warn dE = %.1f" % (name, d)
+
+    def test_the_accent_is_not_confused_with_a_verdict(self):
+        # The theme is worthless if the button orange and the error colour land on
+        # top of each other under the same simulation.
+        tokens = _theme_tokens('[data-theme="cvd"]')
+        flame = _resolve(tokens, "flame")
+        for key in ("ready", "warn"):
+            other = _resolve(tokens, key)
+            d = _delta_e(flame, other, DEUTERANOPIA)
+            assert d >= CVD_SEPARATION, "flame/%s dE = %.1f" % (key, d)
+
+    def test_the_default_palette_is_the_one_that_needs_this(self):
+        # Guards the reason the theme exists. If the default ever clears the line,
+        # a second palette is surface nobody asked to maintain.
+        tokens = _theme_tokens(":root")
+        d = _delta_e(_resolve(tokens, "ready"), _resolve(tokens, "warn"), PROTANOPIA)
+        assert d < CVD_SEPARATION, "default now separates: dE = %.1f" % d
+
+    def test_the_colour_vision_theme_only_moves_colour(self):
+        # It is the dark neutrals with different meaning colours. A different
+        # background would make it a second design to keep accessible.
+        root, cvd = _tokens(_block(":root")), _tokens(_block('[data-theme="cvd"]'))
+        for key in ("bg", "surface", "raise", "line", "text", "soft", "faint"):
+            assert cvd.get(key, root.get(key)) == root[key], key
 
 
 class TestStatusIsNotHueOnly(unittest.TestCase):
@@ -240,7 +329,7 @@ class TestThemeBeforePaint(unittest.TestCase):
         assert "" in offered, "no follow-the-device option"
         # Choosing dark has to beat a light system setting, so dark is a real
         # choice even though its tokens are the :root defaults.
-        for name in ["light", "dark", "hc"]:
+        for name in ["light", "dark", "hc", "cvd"]:
             assert name in offered, (name, offered)
         for name in [n for n in offered if n]:
             assert name == "dark" or ('[data-theme="%s"]' % name) in html, name

@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-title" content="fireside">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <style>
-  /* One palette, four ways of reading it. Every colour in this file goes
+  /* One palette, five ways of reading it. Every colour in this file goes
      through these tokens, so a theme is a token block and nothing else.
      `--faint` was #7d7364 and measured 4.04:1 on --bg and 3.42:1 on --raise,
      under AA for body text, and it is what the helper lines are set in. */
@@ -30,6 +30,15 @@
     --text:#221e1a; --soft:#57503f; --faint:#6f6759;
     --flame:#8a5a12; --on-flame:#fff8ec; --ready:#2f6b3a; --warn:#9c3527;
     --ring:#8a5a12;
+  }
+  /* Colour-vision safe: the same dark neutrals, so nothing but meaning moves.
+     Ready and warn sit on the axis deuteranopes and protanopes keep (blue
+     against purple), instead of the green/red pair that collapses to one
+     muddy colour. Simulated separation is asserted in tests/test_a11y.py:
+     ready vs warn measures 31/21 dE against 10/7 for the default palette. */
+  [data-theme="cvd"]{
+    --flame:#e69f00; --on-flame:#1a1206; --ready:#56b4e9; --warn:#cc79a7;
+    --ring:#e69f00;
   }
   /* High contrast: full white on black, and the two states are told apart by
      lightness as well as hue, because colour alone is the thing some readers
@@ -366,9 +375,9 @@
   var root = document.documentElement;
   var pick = null;
   try { pick = localStorage.getItem('fs.theme'); } catch (e) {}
-  if (pick === 'light' || pick === 'dark' || pick === 'hc') {
+  if (pick === 'light' || pick === 'dark' || pick === 'hc' || pick === 'cvd') {
     root.setAttribute('data-theme', pick);
-    var dark = pick === 'dark';
+    var dark = pick !== 'light';
     root.style.colorScheme = dark ? 'dark' : 'light';
     var m = document.querySelector('meta[name="theme-color"]');
     if (m) m.setAttribute('content', pick === 'hc' ? '#000000' : (dark ? '#14110f' : '#f7f3ec'));
@@ -661,8 +670,10 @@
         <option value="light" data-t="Light">Light</option>
         <option value="dark" data-t="Dark">Dark</option>
         <option value="hc" data-t="High contrast">High contrast</option>
+        <option value="cvd" data-t="Colour-vision safe">Colour-vision safe</option>
       </select>
       <p class="hint" data-t="High contrast uses white on black with thicker borders, and the status marks are told apart by shape as well as colour.">High contrast uses white on black with thicker borders, and the status marks are told apart by shape as well as colour.</p>
+      <p class="hint" data-t="Colour-vision safe keeps the dark background and moves the status colours to blue and purple, which stay apart for the common kinds of colour blindness. Like every theme, the marks also differ in shape.">Colour-vision safe keeps the dark background and moves the status colours to blue and purple, which stay apart for the common kinds of colour blindness. Like every theme, the marks also differ in shape.</p>
       <h3 style="margin-top:24px" data-t="Password">Password</h3>
       <p class="sub" id="pwsub" data-t="The password you sign in with.">The password you sign in with.</p>
       <div id="pwcurrentrow">
@@ -1031,8 +1042,8 @@ const jpostIdem = (p, o) => api(p, { method: 'POST',
 function errorText(e) {
   const d = (e && e.data) || {};
   if (d.needed != null && d.available != null) {
-    return 'Not enough characters for this run: it needs ' + nchar(d.needed)
-      + ' and you have ' + nchar(d.available) + ' available.';
+    return T('Not enough characters for this run: it needs {needed} and you have {available} available.',
+      { needed: nchar(d.needed), available: nchar(d.available) });
   }
   if (d.reason) return String(e.message) + ': ' + d.reason;
   return String(e && e.message ? e.message : e);
@@ -1087,10 +1098,10 @@ function bellRaise() { ALERTS.unshift({ kind: 'bad', text: $('#rtext').textConte
   b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake');
   setTimeout(() => b.classList.remove('shake'), 700); }
 function renderAlerts() { const m = $('#alertmenu'); m.innerHTML = '';
-  if (!ALERTS.length) { const p = document.createElement('button'); p.disabled = true; p.textContent = 'No alerts'; m.append(p); return; }
+  if (!ALERTS.length) { const p = document.createElement('button'); p.disabled = true; p.textContent = T('No alerts'); m.append(p); return; }
   ALERTS.slice(0, 8).forEach(a => { const d = document.createElement('div'); d.className = 'who';
     d.style.color = a.kind === 'bad' ? 'var(--warn)' : 'var(--soft)'; d.textContent = a.text; m.append(d); });
-  const clr = document.createElement('button'); clr.textContent = 'Clear all';
+  const clr = document.createElement('button'); clr.textContent = T('Clear all');
   clr.onclick = () => { ALERTS = []; $('#bell').classList.remove('alert'); renderAlerts(); m.hidden = true; };
   m.append(clr); }
 $('#rdismiss').onclick = () => { _ribbon('', ''); $('#rdismiss').hidden = true; };
@@ -1108,14 +1119,15 @@ function ago(iso) { if (!iso) return '';
   const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');
   if (isNaN(t)) return '';
   const s = Math.round((Date.now() - t) / 1000);
-  if (s < 60) return 'just now'; if (s < 3600) return Math.round(s/60) + 'm ago';
-  if (s < 86400) return Math.round(s/3600) + 'h ago'; return Math.round(s/86400) + 'd ago'; }
+  if (s < 60) return T('just now'); if (s < 3600) return T('{n}m ago', { n: Math.round(s/60) });
+  if (s < 86400) return T('{n}h ago', { n: Math.round(s/3600) });
+  return T('{n}d ago', { n: Math.round(s/86400) }); }
 const hms = s => { s = Math.max(1, Math.round(s||0)); const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
   if (h) return h + 'h ' + m + 'm'; if (m) return m + 'm ' + (s%60) + 's'; return (s%60) + 's'; };
 const dur = s => { s = Math.max(0, Math.round(s||0));
   if (!s) return 'none yet'; const h = Math.floor(s/3600), m = Math.round((s%3600)/60);
   if (h) return h + 'h ' + m + 'm'; if (m) return m + 'm'; return s + 's'; };
-function needUser() { if (!USER) { fail('set your name first (top right)'); throw new Error('no user'); } }
+function needUser() { if (!USER) { fail(T('set your name first (top right)')); throw new Error('no user'); } }
 
 // --- views -----------------------------------------------------------------
 function show(v) {
@@ -1245,7 +1257,7 @@ function maybeLoadDefaultVoices() {
 
 function renderConns() {
   const box = $('#conns'); box.innerHTML = '';
-  if (!CONNS.length) { const p = document.createElement('p'); p.className = 'small'; p.textContent = 'No voice servers yet.'; box.append(p); return; }
+  if (!CONNS.length) { const p = document.createElement('p'); p.className = 'small'; p.textContent = T('No voice servers yet.'); box.append(p); return; }
   CONNS.forEach(c => {
     const card = document.createElement('div'); card.className = 'conncard';
     const head = document.createElement('div'); head.className = 'connhead';
@@ -1287,7 +1299,7 @@ function renderConns() {
         try { await jpost('/connections/delete', { id: c.id }); await loadConnections(); idle('Removed.'); } catch (e) { fail(e); } };
       row.append(rm);
     } else {
-      const sv = document.createElement('button'); sv.className = 'btn quiet'; sv.type = 'button'; sv.textContent = 'Save my changes';
+      const sv = document.createElement('button'); sv.className = 'btn quiet'; sv.type = 'button'; sv.textContent = T('Save my changes');
       sv.onclick = () => saveOverride(c, card); row.append(sv);
     }
     card.append(row); box.append(card);
@@ -1310,9 +1322,9 @@ async function saveConn(c, card) {
     await loadConnections(); idle('Saved.'); } catch (e) { fail(e); }
 }
 async function saveOverride(c, card) {
-  busy('Saving your changes…');
+  busy(T('Saving your changes…'));
   try { await jpost('/connections/override', { id: c.id, data: _inputs(card, c.id, true) });
-    await loadConnections(); idle('Saved for you.'); } catch (e) { fail(e); }
+    await loadConnections(); idle(T('Saved for you.')); } catch (e) { fail(e); }
 }
 
 function renderDefaultPicker() {
@@ -1348,7 +1360,7 @@ function renderAddFields() { const box = $('#cfields'); box.innerHTML = '';
     if (f.help) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = f.help; box.append(h); } }); }
 $('#csave').onclick = async () => {
   const data = {}; document.querySelectorAll('#cfields [data-field]').forEach(el => { if (el.value) data[el.dataset.field] = el.value; });
-  busy('Adding the server…');
+  busy(T('Adding the server…'));
   const scope = (AUTH.admin && $('#cshare').checked) ? 'system' : 'personal';
   try { await jpost('/connections', { provider: $('#cprovider').value, label: $('#clabel').value, data, scope });
     $('#connform').hidden = true; $('#clabel').value = ''; $('#cshare').checked = false;
@@ -1398,8 +1410,8 @@ function scopeSelect(val) {
 function pronRow(frm, to, scope) {
   const row = document.createElement('div');
   row.className = 'prow'; row.style.cssText = 'display:flex;gap:6px;margin-top:6px;flex-wrap:wrap';
-  const a = document.createElement('input'); a.value = frm || ''; a.placeholder = 'word in the text'; a.style.flex = '1 1 0';
-  const b = document.createElement('input'); b.value = to || ''; b.placeholder = 'how it should sound'; b.style.flex = '1.4 1 0';
+  const a = document.createElement('input'); a.value = frm || ''; a.placeholder = T('word in the text'); a.style.flex = '1 1 0';
+  const b = document.createElement('input'); b.value = to || ''; b.placeholder = T('how it should sound'); b.style.flex = '1.4 1 0';
   const s = scopeSelect(scope || '');
   const t = document.createElement('button'); t.type = 'button'; t.className = 'btn quiet'; t.textContent = 'Test';
   t.onclick = () => { collectPron(); testPron(b.value || a.value); };
@@ -1443,9 +1455,9 @@ async function savePron() {
 }
 async function testPron(text) {
   text = (text || '').trim();
-  if (!text) { fail('type how it should sound first'); return; }
+  if (!text) { fail(T('type how it should sound first')); return; }
   const cid = $('#dconn').value, v = $('#voice').value || PREFS.default_voice;
-  if (!v) { fail('No default voice yet. Pick one under Settings, Voice, then Save, and this Test will use it.'); return; }
+  if (!v) { fail(T('No default voice yet. Pick one under Settings, Voice, then Save, and this Test will use it.')); return; }
   busy('Hearing "' + text + '"...');
   try {
     const r = await api('/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1572,16 +1584,16 @@ if ($('#pwsave')) $('#pwsave').onclick = async () => {
   const msg = $('#pwmsg'); msg.style.color = '';
   const cur = $('#pwcurrent').value, pw = $('#pwnew').value, pw2 = $('#pwnew2').value;
   const uname = ($('#pwusername').value || '').trim();
-  if (pw.length < 8) { msg.textContent = 'A password needs at least 8 characters.'; return; }
-  if (pw !== pw2) { msg.textContent = 'The two new passwords do not match.'; return; }
-  if (PWHAS === false && !uname) { msg.textContent = 'Pick a sign-in name first.'; return; }
-  busy('Saving the password...');
+  if (pw.length < 8) { msg.textContent = T('A password needs at least 8 characters.'); return; }
+  if (pw !== pw2) { msg.textContent = T('The two new passwords do not match.'); return; }
+  if (PWHAS === false && !uname) { msg.textContent = T('Pick a sign-in name first.'); return; }
+  busy(T('Saving the password...'));
   try {
     const d = await jpost('/account/password', PWHAS === false
       ? { password: pw, username: uname }
       : { current: cur, password: pw });
     PWHAS = true;
-    idle('Password saved. Other devices were signed out.');
+    idle(T('Password saved. Other devices were signed out.'));
     await loadPasswordPanel();
     $('#pwmsg').textContent = 'Saved. Sign in with the name "' + (d.username || uname)
       + '" and your new password.';
@@ -1612,7 +1624,7 @@ async function loadLinked() {
   const social = provs.filter(p => p.kind !== 'local' && p.start);
   if (!social.length) {
     const p = document.createElement('p'); p.className = 'small';
-    p.textContent = 'No social sign-in is set up on this server.';
+    p.textContent = T('No social sign-in is set up on this server.');
     box.append(p); return;
   }
   social.forEach(p => {
@@ -1645,7 +1657,7 @@ async function loadSessions() {
   try { data = await api('/sessions') || {}; list = data.sessions || []; } catch (_) { data = {}; list = []; }
   if (!list.length) {
     const p = document.createElement('p'); p.className = 'small';
-    p.textContent = 'No active sessions.'; box.append(p);
+    p.textContent = T('No active sessions.'); box.append(p);
   }
   list.forEach(s => {
     const row = document.createElement('div');
@@ -1653,21 +1665,21 @@ async function loadSessions() {
     const name = document.createElement('div'); name.style.flex = '1 1 0';
     const t1 = document.createElement('div'); t1.textContent = s.label || 'Device';
     const t2 = document.createElement('div'); t2.className = 'small';
-    t2.textContent = 'last used ' + _agoUnix(s.last_seen)
-      + (s.provider ? ' · signed in with ' + s.provider : '') + (s.ip ? ' · ' + s.ip : '');
+    t2.textContent = T('last used {when}', { when: _agoUnix(s.last_seen) })
+      + (s.provider ? ' · ' + T('signed in with {provider}', { provider: s.provider }) : '') + (s.ip ? ' · ' + s.ip : '');
     name.append(t1, t2);
     row.append(name);
     if (s.current) {
       const tag = document.createElement('span'); tag.className = 'small';
-      tag.textContent = 'this device';
+      tag.textContent = T('this device');
       row.append(tag);
     } else {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'btn quiet';
-      b.textContent = 'Log out';
+      b.textContent = T('Log out');
       b.onclick = async () => {
         try { await jpost('/sessions/revoke', { id: s.id });
-              $('#sessmsg').textContent = 'Signed that device out.'; loadSessions(); }
-        catch (e) { $('#sessmsg').textContent = e.message || 'could not sign it out'; }
+              $('#sessmsg').textContent = T('Signed that device out.'); loadSessions(); }
+        catch (e) { $('#sessmsg').textContent = e.message || T('could not sign it out'); }
       };
       row.append(b);
     }
@@ -1689,19 +1701,19 @@ async function loadSessions() {
       const name = document.createElement('div'); name.style.flex = '1 1 0';
       const t1 = document.createElement('div'); t1.textContent = (s.user || 'unknown') + ' · ' + (s.label || 'Device');
       const t2 = document.createElement('div'); t2.className = 'small';
-      t2.textContent = 'last used ' + _agoUnix(s.last_seen) + (s.ip ? ' · ' + s.ip : '');
+      t2.textContent = T('last used {when}', { when: _agoUnix(s.last_seen) }) + (s.ip ? ' · ' + s.ip : '');
       name.append(t1, t2);
       row.append(name);
       if (s.current) {
-        const tag = document.createElement('span'); tag.className = 'small'; tag.textContent = 'this device';
+        const tag = document.createElement('span'); tag.className = 'small'; tag.textContent = T('this device');
         row.append(tag);
       } else {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'btn quiet';
         b.textContent = 'Boot';
         b.onclick = async () => {
           try { await jpost('/sessions/revoke', { id: s.id });
-                $('#sessmsg').textContent = 'Booted ' + (s.user || 'that session') + '.'; loadSessions(); }
-          catch (e) { $('#sessmsg').textContent = e.message || 'could not boot it'; }
+                $('#sessmsg').textContent = T('Booted {who}.', { who: s.user || T('that session') }); loadSessions(); }
+          catch (e) { $('#sessmsg').textContent = e.message || T('could not boot it'); }
         };
         row.append(b);
       }
@@ -1731,7 +1743,7 @@ async function loadGrants() {
         const body = { user: u.user_id };
         body[key] = cb.checked;
         try { await jpost('/grants', body);
-              $('#grantmsg').textContent = 'Saved for ' + u.username + '.'; }
+              $('#grantmsg').textContent = T('Saved for {user}.', { user: u.username }); }
         catch (e) { cb.checked = !cb.checked;
                     $('#grantmsg').textContent = e.message || 'could not save'; }
       };
@@ -1758,10 +1770,10 @@ function money(n) { return '$' + (Math.round(n * 100) / 100).toFixed(2); }
 async function loadCredits() {
   const box = $('#creditsbox'); if (!box) return;
   if (!USER) {
-    box.textContent = 'Sign in to see your character balance.';
+    box.textContent = T('Sign in to see your character balance.');
     clearCredits(); $('#creditsrate').textContent = ''; return;
   }
-  box.textContent = 'Checking your character balance\u2026';
+  box.textContent = T('Checking your character balance\u2026');
   let d;
   try { d = await api('/credits'); }
   catch (e) {
@@ -1782,9 +1794,9 @@ async function loadCredits() {
   CREDITS = d;
   const avail = d.available || 0, held = d.reserved || 0;
   box.textContent = avail > 0
-    ? nchar(avail) + ' characters left.'
-    : '0 characters. A render through the metered voice will be refused until you buy capacity.';
-  if (held > 0) box.textContent += ' \u00b7 ' + nchar(held) + ' held by a run in progress.';
+    ? T('{n} characters left.', { n: nchar(avail) })
+    : T('0 characters. A render through the metered voice will be refused until you buy capacity.');
+  if (held > 0) box.textContent += ' \u00b7 ' + T('{n} held by a run in progress.', { n: nchar(held) });
   const sale = d.sale;
   // The sentence follows the shape the server actually sent. A null rate used to
   // mean "price unknown" even when priced buttons sat right underneath it; now a
@@ -1793,7 +1805,7 @@ async function loadCredits() {
   $('#creditsrate').textContent = !sale
     ? 'No voice server is selling characters right now, so there is nothing to buy here. Your own connected voices still work.'
     : (sale.rate_per_1m_chars != null
-      ? 'Characters cost ' + money(sale.rate_per_1m_chars) + ' per million.'
+      ? T('Characters cost {rate} per million.', { rate: money(sale.rate_per_1m_chars) })
       : (priced
         ? 'Characters are sold in the packages below.'
         : 'This voice server is not selling characters right now.'));
@@ -1843,7 +1855,7 @@ function drawCreditsBuy(d) {
   const can = !!d.payments_configured;
   const msg = t => { const m = $('#creditsmsg'); if (m) m.textContent = t; };
   const buy = usd => async () => {
-    msg('Opening the payment page\u2026');
+    msg(T('Opening the payment page\u2026'));
     try {
       const r = await jpostIdem('/credits/purchase', {
         usd: Number(usd),
@@ -1855,9 +1867,9 @@ function drawCreditsBuy(d) {
       msg('+' + nchar(r.chars) + ' characters. Reference ' + r.reference + '.');
       await loadCredits();
     } catch (e) {
-      if (e.status === 503) msg('Buying is not switched on yet, so nothing was charged.');
+      if (e.status === 503) msg(T('Buying is not switched on yet, so nothing was charged.'));
       else if (e.status === 402) msg('The payment was refused. Nothing was charged. ' + ((e.data || {}).detail || ''));
-      else if (e.status === 400) msg('That amount does not buy any characters. Try a larger one.');
+      else if (e.status === 400) msg(T('That amount does not buy any characters. Try a larger one.'));
       else msg(e.message || 'could not buy characters');
     }
   };
@@ -1867,7 +1879,7 @@ function drawCreditsBuy(d) {
       const btn = document.createElement('button');
       btn.className = 'btn'; btn.type = 'button';
       btn.textContent = money(b.usd) + (b.chars ? ' \u00b7 ' + nchar(b.chars) + ' chars' : '');
-      btn.disabled = !can; if (!can) btn.title = 'Not for sale yet';
+      btn.disabled = !can; if (!can) btn.title = T('Not for sale yet');
       btn.onclick = buy(b.usd);
       box.append(btn);
     });
@@ -1875,14 +1887,14 @@ function drawCreditsBuy(d) {
     const inp = document.createElement('input');
     inp.type = 'number'; inp.min = '1'; inp.value = '5'; inp.style.maxWidth = '90px';
     const btn = document.createElement('button');
-    btn.className = 'btn'; btn.type = 'button'; btn.textContent = 'Buy characters';
-    btn.disabled = !can; if (!can) btn.title = 'Not for sale yet';
+    btn.className = 'btn'; btn.type = 'button'; btn.textContent = T('Buy characters');
+    btn.disabled = !can; if (!can) btn.title = T('Not for sale yet');
     btn.onclick = () => buy(Math.max(1, parseFloat(inp.value || '0')));
     box.append(inp, btn);
   }
   if (!can) {
     const note = document.createElement('span'); note.className = 'small';
-    note.textContent = 'Buying is not switched on yet, so nothing can be charged.';
+    note.textContent = T('Buying is not switched on yet, so nothing can be charged.');
     box.append(note);
   }
 }
@@ -1945,7 +1957,7 @@ async function loadPlan() {
     note.textContent = 'Renews through ' + (sub.provider || 'the payment provider') + '.';
     row.append(note);
     const manage = document.createElement('button');
-    manage.className = 'btn'; manage.type = 'button'; manage.textContent = 'Change card';
+    manage.className = 'btn'; manage.type = 'button'; manage.textContent = T('Change card');
     manage.onclick = async () => {
       try {
         const d = await jpost('/billing/portal',
@@ -1955,13 +1967,13 @@ async function loadPlan() {
       } catch (e) { $('#planmsg').textContent = errorText(e); }
     };
     const cancel = document.createElement('button');
-    cancel.className = 'btn'; cancel.type = 'button'; cancel.textContent = 'Cancel renewal';
+    cancel.className = 'btn'; cancel.type = 'button'; cancel.textContent = T('Cancel renewal');
     cancel.onclick = async () => {
       if (!window.confirm('Stop the next charge? You keep what you already paid '
         + 'for until the period ends.')) return;
       try {
         await jpost('/billing/cancel', {});
-        idle('Renewal cancelled. You keep access until the period ends.');
+        idle(T('Renewal cancelled. You keep access until the period ends.'));
         loadPlan();
       } catch (e) { $('#planmsg').textContent = errorText(e); }
     };
@@ -1980,7 +1992,7 @@ async function loadPlan() {
       const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;align-items:center';
       const inp = document.createElement('input'); inp.type = 'number'; inp.min = '1'; inp.value = '1';
       inp.style.maxWidth = '90px';
-      const b = document.createElement('button'); b.className = 'btn'; b.type = 'button'; b.textContent = 'Buy blocks';
+      const b = document.createElement('button'); b.className = 'btn'; b.type = 'button'; b.textContent = T('Buy blocks');
       b.disabled = !(cat && cat.payments_configured && st.amount_cents != null);
       b.onclick = () => startCheckout({ plan: st.addon, quantity: Math.max(1, parseInt(inp.value || '1', 10)) });
       row.append(inp, b); blocks.append(p, row);
@@ -2007,7 +2019,7 @@ async function confirmCheckout(ref) {
     const d = await jpost('/billing/confirm', { reference: ref });
     if (d.subscription) idle('You are on the ' + d.subscription.plan + ' plan.');
     else if (d.addon) idle('Storage updated. You now have ' + d.addon.quantity + ' block(s).');
-    else if (d.applied) idle('Purchase complete.');
+    else if (d.applied) idle(T('Purchase complete.'));
     if (d.ok) clearCart();
     return;
   } catch (e) {
@@ -2083,10 +2095,10 @@ function planCard(t, plan, cat) {
   card.append(ul);
   if (on) {
     const tag = document.createElement('p'); tag.className = 'sub'; tag.style.margin = '12px 0 0';
-    tag.textContent = 'This is your current plan.'; card.append(tag);
+    tag.textContent = T('This is your current plan.'); card.append(tag);
   } else if (t.amount_cents == null) {
     const b = document.createElement('button'); b.className = 'btn'; b.type = 'button';
-    b.style.marginTop = '12px'; b.textContent = 'Not for sale yet'; b.disabled = true;
+    b.style.marginTop = '12px'; b.textContent = T('Not for sale yet'); b.disabled = true;
     card.append(b);
   } else {
     const b = document.createElement('button'); b.className = 'btn'; b.type = 'button';
@@ -2119,7 +2131,7 @@ function renderCart() {
        ? ' — ' + usd(cat.storage.amount_cents * c.blocks) + '/' + (cat.storage.interval || 'mo')
        : ' — price not set'));
   box.innerHTML = '';
-  if (!lines.length) box.textContent = 'Nothing in the cart yet. Pick a plan, and add storage if you need it.';
+  if (!lines.length) box.textContent = T('Nothing in the cart yet. Pick a plan, and add storage if you need it.');
   lines.forEach(x => { const d = document.createElement('div'); d.textContent = x; box.append(d); });
   const tot = cartTotalCents();
   $('#pagetotal').textContent = lines.length
@@ -2132,14 +2144,14 @@ function renderCart() {
 }
 async function buyPurchase() {
   const c = readCart(), cat = PLAN_CAT || {}, msg = $('#pageplanmsg');
-  if (!c.tier) { msg.textContent = 'Pick a plan first.'; return; }
+  if (!c.tier) { msg.textContent = T('Pick a plan first.'); return; }
   const items = cartItems();
   if (!items.length) {
     // The free plan costs nothing: there is no charge, only an account.
     if (!AUTH.user) { openDoor('create'); return; }
     clearCart(); loadPlansPage();
-    idle('You are on the free plan.');
-    msg.textContent = 'You are on the free plan. Connect a voice provider to start listening.';
+    idle(T('You are on the free plan.'));
+    msg.textContent = T('You are on the free plan. Connect a voice provider to start listening.');
     return;
   }
   if (!AUTH.user) { openDoor('create'); return; }   // account first, then the payment
@@ -2169,7 +2181,7 @@ async function loadPlansPage() {
   const plan = AUTH.user ? (s.plan || 'free') : '';
   box.innerHTML = '';
   ((cat && cat.tiers) || []).forEach(t => box.append(planCard(t, plan, cat)));
-  if (!cat || !cat.tiers) box.textContent = 'Could not load the plans just now.';
+  if (!cat || !cat.tiers) box.textContent = T('Could not load the plans just now.');
   const blocks = $('#pageblocks');
   if (blocks) {
     blocks.innerHTML = '';
@@ -2183,7 +2195,7 @@ async function loadPlansPage() {
       const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
       const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.value = String(c.blocks || 0);
       inp.style.maxWidth = '90px';
-      const b = document.createElement('button'); b.className = 'btn quiet'; b.type = 'button'; b.textContent = 'Set blocks';
+      const b = document.createElement('button'); b.className = 'btn quiet'; b.type = 'button'; b.textContent = T('Set blocks');
       b.onclick = () => { const cc = readCart(); cc.blocks = Math.max(0, parseInt(inp.value || '0', 10) || 0);
                           writeCart(cc); loadPlansPage(); };
       row.append(inp, b); blocks.append(p, row);
@@ -2213,8 +2225,8 @@ async function loadRegSetting() {
         cb.checked = p.registration_open !== false; } catch (e) {}
   cb.onchange = async () => {
     try { const d = await jpost('/auth/registration', { open: cb.checked });
-          $('#regmsg').textContent = 'Sign-ups are now '
-            + (d.registration === 'open' ? 'open.' : 'closed.');
+          $('#regmsg').textContent = d.registration === 'open'
+            ? T('Sign-ups are now open.') : T('Sign-ups are now closed.');
           AUTH.registrationOpen = cb.checked; }
     catch (e) { cb.checked = !cb.checked; $('#regmsg').textContent = e.message || 'could not save'; }
   };
@@ -2250,19 +2262,19 @@ async function revokeSessions(others, allUsers) {
     const body = { others: others }; if (allUsers) body.all_users = true;
     const d = await jpost('/sessions/revoke_all', body);
     $('#sessmsg').textContent = allUsers
-      ? ('Booted ' + (d.revoked || 0) + ' session(s) across the server.')
-      : (others ? ('Signed out ' + (d.revoked || 0) + ' other device(s).')
-                : 'Signed out of every device. Please sign in again.');
+      ? T('Booted {n} session(s) across the server.', { n: d.revoked || 0 })
+      : (others ? T('Signed out {n} other device(s).', { n: d.revoked || 0 })
+                : T('Signed out of every device. Please sign in again.'));
     if (!others && !allUsers) { setTimeout(() => location.reload(), 900); return; }
     loadSessions();
   } catch (e) { $('#sessmsg').textContent = e.message || 'could not sign out'; }
 }
 if ($('#sessothers')) $('#sessothers').onclick = () => revokeSessions(true);
 if ($('#sessall')) $('#sessall').onclick = () => {
-  if (confirm('Log out of every device, including this one?')) revokeSessions(false);
+  if (confirm(T('Log out of every device, including this one?'))) revokeSessions(false);
 };
 if ($('#sessallusers')) $('#sessallusers').onclick = () => {
-  if (confirm('Boot every session on the server, except this one?')) revokeSessions(true, true);
+  if (confirm(T('Boot every session on the server, except this one?'))) revokeSessions(true, true);
 };
 // --- two-factor: one modal for enrolling and for finishing a login ----------
 // The server decides whether a factor is owed (auth.create_session does it at
@@ -2295,7 +2307,7 @@ async function twofaEnrollStart(proof) {
   const a = $('#twofauri');
   a.innerHTML = '';
   const link = document.createElement('a');
-  link.href = info.uri || '#'; link.textContent = 'open in an authenticator app →';
+  link.href = info.uri || '#'; link.textContent = T('open in an authenticator app →');
   a.append('Or '); a.append(link);
   twofaShow('enroll', () => { location.reload(); });
 }
@@ -2315,7 +2327,7 @@ async function twofaSubmit() {
       $('#twofacancel').hidden = true;
       $('#twofago').hidden = true;
       $('#twofainput').hidden = true;
-      $('#twofasub').textContent = 'Save these somewhere safe. Each one signs you in once, and this is the only time they are shown.';
+      $('#twofasub').textContent = T('Save these somewhere safe. Each one signs you in once, and this is the only time they are shown.');
       const box = $('#twofaerr');
       box.innerHTML = '';
       codes.forEach(c => {
@@ -2324,7 +2336,7 @@ async function twofaSubmit() {
         row.textContent = c; box.append(row);
       });
       const done = document.createElement('button');
-      done.className = 'btn'; done.type = 'button'; done.textContent = 'I saved them';
+      done.className = 'btn'; done.type = 'button'; done.textContent = T('I saved them');
       done.style.marginTop = '14px';
       done.onclick = () => { $('#twofadlg').hidden = true; if (TWOFA.onDone) TWOFA.onDone(); };
       box.append(done);
@@ -2355,7 +2367,7 @@ async function loadTwofa() {
     box.textContent = 'On. ' + (st.recovery_left || 0) + ' recovery code(s) left.'
       + (st.required ? ' Administrator accounts must keep this on.' : '');
   } else if (st.required) {
-    box.textContent = 'Required for this account: an administrator always carries a second factor.';
+    box.textContent = T('Required for this account: an administrator always carries a second factor.');
   } else {
     box.textContent = 'Off.';
   }
@@ -2388,7 +2400,7 @@ if ($('#twofarecov')) $('#twofarecov').onclick = async () => {
   try {
     const d = await jpost('/2fa/recovery', { code });
     const codes = (d.recovery || []).join('\n');
-    $('#twofamessage').textContent = 'New codes (this is the only time they are shown):';
+    $('#twofamessage').textContent = T('New codes (this is the only time they are shown):');
     const pre = document.createElement('pre');
     pre.style.cssText = 'white-space:pre-wrap;font-size:13px;margin-top:6px';
     pre.textContent = codes;
@@ -2398,10 +2410,10 @@ if ($('#twofarecov')) $('#twofarecov').onclick = async () => {
 };
 if ($('#twofaoffbtn')) $('#twofaoffbtn').onclick = async () => {
   const code = ($('#twofacode').value || '').replace(/[^0-9]/g, '');
-  if (!confirm('Turn off two-factor for this account?')) return;
+  if (!confirm(T('Turn off two-factor for this account?'))) return;
   try {
     await jpost('/2fa/disable', { code });
-    $('#twofamessage').textContent = 'Two-factor is off.';
+    $('#twofamessage').textContent = T('Two-factor is off.');
     loadTwofa();
   } catch (e) { $('#twofamessage').textContent = e.message || 'could not turn it off'; }
 };
@@ -2421,11 +2433,11 @@ function loadDanger() {
 if ($('#delbtn')) $('#delbtn').onclick = async () => {
   const body = AUTH.hasPassword ? { password: $('#delpw').value }
                                 : { confirm: $('#delconf').value };
-  if (!confirm('Delete your account and everything in it? This cannot be undone.')) return;
+  if (!confirm(T('Delete your account and everything in it? This cannot be undone.'))) return;
   $('#delbtn').disabled = true;
   try {
     await jpost('/account/delete', body);
-    $('#delmsg').textContent = 'Account deleted.';
+    $('#delmsg').textContent = T('Account deleted.');
     localStorage.removeItem(UKEY);
     location.reload();
   } catch (e) {
@@ -2545,6 +2557,9 @@ async function authSubmit() {
 }
 
 async function requireSession() {
+  // On the lock screen there is no session to interrogate, and asking anyway
+  // puts a 401 in every first visitor's console.
+  if (document.body.classList.contains('locked')) return false;
   // A half-session is signed in and one factor short. Ask before anything
   // else: every other call answers 401 with a twofa field, which without this
   // reads exactly like being signed out.
@@ -2606,7 +2621,7 @@ async function requireSession() {
   try {
     // Back from a browser-tab sign-in that expired on the way home.
     const back = new URLSearchParams(location.search).get('app');
-    if (back === 'again') setTimeout(() => fail('That sign-in expired before it reached the app. Try again.'), 300);
+    if (back === 'again') setTimeout(() => fail(T('That sign-in expired before it reached the app. Try again.')), 300);
   } catch (_) {}
   if (claim) {                      // a social login collided; prove the account
     AUTH.mode = 'claim'; AUTH.claim = claim;
@@ -2623,12 +2638,12 @@ async function requireSession() {
 // already signs in: its password, or one of its own providers. Anything
 // else, and we attach nothing.
 async function renderClaim() {
-  $('#locktitle').textContent = 'confirm this account';
+  $('#locktitle').textContent = T('confirm this account');
   $('#lockuser').closest('.field').hidden = true;
   $('#lockconfirm').hidden = true;
   $('#lockpass').value = '';
   $('#lockpass').setAttribute('autocomplete', 'current-password');
-  $('#lockgo').textContent = 'Confirm and link';
+  $('#lockgo').textContent = T('Confirm and link');
   $('#locktoggle').hidden = true;
   $('#lockplans').hidden = true;
   authMsg('');
@@ -2657,10 +2672,10 @@ async function renderClaim() {
     });
     if (d.has_password) { pfield.focus(); }
     else if (!(d.methods || []).length) {
-      $('#locksub').textContent = 'This sign-in has expired. Go back and start again.';
+      $('#locksub').textContent = T('This sign-in has expired. Go back and start again.');
     }
   } catch (e) {
-    $('#locksub').textContent = 'This sign-in has expired. Go back and start again.';
+    $('#locksub').textContent = T('This sign-in has expired. Go back and start again.');
     authMsg(e.message || '');
     $('#lockpass').closest('.field').hidden = true;
     $('#lockgo').hidden = true;
@@ -2730,8 +2745,8 @@ function filterSel(sel, q) {
   [...sel.options].forEach(o => { const hit = !q || (o.value + ' ' + o.textContent).toLowerCase().includes(q); o.hidden = !hit; o.disabled = !hit; });
   const c = sel.selectedOptions[0]; if (!c || c.disabled) { const f = [...sel.options].find(o => !o.disabled); if (f) sel.value = f.value; } }
 async function loadVoices(quiet) {
-  const cid = $('#dconn').value; if (!cid) { if (!quiet) idle('Add a voice server first.'); return; }
-  if (!quiet) busy('Loading voices…');
+  const cid = $('#dconn').value; if (!cid) { if (!quiet) idle(T('Add a voice server first.')); return; }
+  if (!quiet) busy(T('Loading voices…'));
   try {
     const d = await jpost('/voices', { connection_id: cid });
     voices = d.voices || [];
@@ -2778,10 +2793,12 @@ async function doImport(payload, note) {
 }
 function askReplace(payload, ex) {
   PENDING_IMPORT = payload;
-  const n = ex.rendered ? ' ' + ex.rendered + ' of them already voiced; a voice stays as long as its words did not change.' : '';
-  $('#duptext').textContent = 'Already on your shelf as "' + ex.title + '" (' + ex.chapters + ' chapter' + (ex.chapters === 1 ? '' : 's') + ').' + n;
+  const n = ex.rendered
+    ? ' ' + T('{n} of them already voiced; a voice stays as long as its words did not change.', { n: ex.rendered }) : '';
+  $('#duptext').textContent = T('Already on your shelf as "{title}" ({n} chapter(s)).',
+    { title: ex.title, n: ex.chapters }) + n;
   $('#dupnote').hidden = false;
-  idle('That book is already in your library.');
+  idle(T('That book is already in your library.'));
   $('#dupnote').scrollIntoView({ block: 'nearest' });
 }
 $('#dupgo').onclick = () => { if (!PENDING_IMPORT) return; const p = PENDING_IMPORT;
@@ -2831,14 +2848,14 @@ function seriesHead(g) {
   const ren = document.createElement('button'); ren.type = 'button'; ren.className = 'btn quiet sbtn'; ren.textContent = 'Rename';
   ren.onclick = async (ev) => {
     ev.stopPropagation();
-    const v = (prompt('Rename the series', g.name) || '').trim(); if (!v || v === g.name) return;
+    const v = (prompt(T('Rename the series'), g.name) || '').trim(); if (!v || v === g.name) return;
     try { await jpost('/series', { op: 'rename', id: g.id, name: v, user: USER }); await loadLibrary(); }
     catch (e) { fail(e); }
   };
   const del = document.createElement('button'); del.type = 'button'; del.className = 'btn quiet sbtn'; del.textContent = 'Delete';
   del.onclick = async (ev) => {
     ev.stopPropagation();
-    if (!confirm('Delete the series “' + g.name + '”? The books stay on your shelf.')) return;
+    if (!confirm(T('Delete the series “{name}”? The books stay on your shelf.', { name: g.name }))) return;
     try { await jpost('/series', { op: 'delete', id: g.id, user: USER }); await loadLibrary(); }
     catch (e) { fail(e); }
   };
@@ -2919,13 +2936,13 @@ function renderWelcome() {
   const foot = document.createElement('p'); foot.className = 'sub'; foot.style.margin = '12px 0 0';
   foot.append('Or hear something now: ');
   const exb = document.createElement('button');
-  exb.type = 'button'; exb.className = 'btn quiet'; exb.textContent = 'Read the free example book';
+  exb.type = 'button'; exb.className = 'btn quiet'; exb.textContent = T('Read the free example book');
   exb.onclick = addExampleBook;
   foot.append(exb); box.append(foot);
 }
 async function addExampleBook() {
   $('#err').textContent = '';
-  busy('Adding the example book…');
+  busy(T('Adding the example book…'));
   try {
     const d = await jpost('/book/example', { user: USER, render: true });
     await loadLibrary();
@@ -2936,13 +2953,13 @@ async function addExampleBook() {
         await new Promise(r => setTimeout(r, 900));
         const j = await api('/job?id=' + encodeURIComponent(jid));
         if (j.status === 'error') { fail(new Error(j.error || 'voicing failed')); return; }
-        if (j.status === 'cancelled') { idle('Voicing cancelled.'); return; }
+        if (j.status === 'cancelled') { idle(T('Voicing cancelled.')); return; }
         if (j.status === 'done') break;
         progress('Voicing the example  ·  ch ' + j.current + '/' + j.total);
       }
       await openBook(d.book_id, true);
     }
-    idle('The example book is ready. Press play.');
+    idle(T('The example book is ready. Press play.'));
   } catch (e) { fail(e); }
   finally { renderActiveJobs(); }
 }
@@ -2969,7 +2986,7 @@ function renderResume() {
   if (!b) return;
   const cover = document.createElement('div'); cover.className = 'cover'; fillCover(cover, b.id, b.title, b.cover);
   const col = document.createElement('div'); col.style.flex = '1'; col.style.minWidth = '0';
-  const kick = document.createElement('p'); kick.className = 'small'; kick.textContent = 'Pick up where you left off';
+  const kick = document.createElement('p'); kick.className = 'small'; kick.textContent = T('Pick up where you left off');
   const h = document.createElement('h2'); h.textContent = b.title;
   const meta = document.createElement('p'); meta.className = 'sub';
   let mt = b.rendered + ' of ' + b.chapters + ' chapters voiced';
@@ -2978,7 +2995,7 @@ function renderResume() {
   meta.textContent = mt;
   const states = Array.from({ length: b.chapters }, (_, i) => i < b.rendered ? 'avail' : 'todo');
   const sp = spineEl(states, -1); sp.style.margin = '12px 0';
-  const go = document.createElement('button'); go.className = 'btn'; go.textContent = 'Continue listening';
+  const go = document.createElement('button'); go.className = 'btn'; go.textContent = T('Continue listening');
   go.onclick = () => loadBook(b.id);
   col.append(kick, h, meta, sp, go);
   box.append(cover, col);
@@ -3136,7 +3153,7 @@ function renderPlay() {
     im.textContent = line; im.hidden = !line;
   }
   if (de) { de.textContent = book.description || ''; de.hidden = !book.description; }
-  if (cur < 0) { $('#npkicker').textContent = book.title; $('#nptitle').textContent = 'Choose a chapter'; $('#nptext').innerHTML = ''; updateTransport(); return; }
+  if (cur < 0) { $('#npkicker').textContent = book.title; $('#nptitle').textContent = T('Choose a chapter'); $('#nptext').innerHTML = ''; updateTransport(); return; }
   const c = book.chapters.find(x => x.idx === cur);
   $('#npkicker').textContent = book.title + ' · Chapter ' + (cur + 1) + ' of ' + book.chapters.length;
   $('#nptitle').textContent = c.title || ('Chapter ' + (cur + 1));
@@ -3155,7 +3172,7 @@ function renderChapterList() {
     const canPlay = !!(r && r.audio_ref);
     const pbtn = document.createElement('button');
     pbtn.type = 'button'; pbtn.className = 'chapplay'; pbtn.textContent = '▶';
-    pbtn.title = canPlay ? 'Play this chapter' : 'Not converted in this voice';
+    pbtn.title = canPlay ? T('Play this chapter') : T('Not converted in this voice');
     pbtn.disabled = !canPlay;
     pbtn.onclick = e => { e.stopPropagation(); if (canPlay) play(c.idx, true); };
     const meta = document.createElement('div'); meta.className = 'chapmeta';
@@ -3185,8 +3202,9 @@ function selVoiceName() {
 }
 function nothingVoicedMsg(prefix) {
   const n = selVoiceName();
-  return (prefix || 'Nothing voiced yet') + (n ? ' in ' + n : '')
-    + '. Use Convert on the book page to voice it.';
+  const base = prefix || T('Nothing voiced yet');
+  return n ? T('{base} in {voice}. Use Convert on the book page to voice it.', { base: base, voice: n })
+           : T('{base}. Use Convert on the book page to voice it.', { base: base });
 }
 function chapterVoiceLabel(c) {
   const vs = chapterVoices(c);
@@ -3214,16 +3232,17 @@ function drawSpine() {
 function drawNote() {
   const c = book.chapters.find(x => x.idx === cur); const n = $('#npnote'); n.className = 'small';
   if (!c) return;
-  if (state[cur] === 'ready') n.textContent = 'This chapter is on your device, checked and ready.';
-  else if (state[cur] === 'fail') { n.textContent = 'This download failed its check. Use Download for offline to try again.'; n.className = 'note bad'; }
-  else if (state[cur] === 'avail') n.textContent = 'Still on the server. Fireside downloads and checks it before playing.';
+  if (state[cur] === 'ready') n.textContent = T('This chapter is on your device, checked and ready.');
+  else if (state[cur] === 'fail') { n.textContent = T('This download failed its check. Use Download for offline to try again.'); n.className = 'note bad'; }
+  else if (state[cur] === 'avail') n.textContent = T('Still on the server. Fireside downloads and checks it before playing.');
   else if (state[cur] === 'todo') {
     const other = (c.renditions || []).length;
     const vn = selVoiceName();
-    n.textContent = other ? 'Not converted in this voice yet' + (vn ? ' (' + vn + ')' : '')
-                            + '. Pick another voice above, or convert it in this one.'
-                          : 'Not voiced yet. Use Convert to voice it'
-                            + (vn ? ' in ' + vn : '') + '.';
+    n.textContent = other
+      ? (vn ? T('Not converted in this voice yet ({voice}). Pick another voice above, or convert it in this one.', { voice: vn })
+            : T('Not converted in this voice yet. Pick another voice above, or convert it in this one.'))
+      : (vn ? T('Not voiced yet. Use Convert to voice it in {voice}.', { voice: vn })
+            : T('Not voiced yet. Use Convert to voice it.'));
   }
 }
 async function loadText(idx) {
@@ -3422,7 +3441,7 @@ async function playFromSelection() {
   if (frac == null || cur < 0 || !book) return;
   const c = book.chapters.find(x => x.idx === cur); if (!c) return;
   const rd = renditionFor(c);
-  if (!rd || !rd.audio_ref) { idle('This chapter is not converted in this voice yet.'); return; }
+  if (!rd || !rd.audio_ref) { idle(T('This chapter is not converted in this voice yet.')); return; }
   if (pcur !== cur || !$a.src) await playSelection(book, cur, true);
   else $a.play().catch(() => {});
   seekFraction(frac);
@@ -3563,7 +3582,7 @@ async function runConvert(list, label) {
       await new Promise(res => setTimeout(res, 1200));
       const j = await api('/job?id=' + encodeURIComponent(r.job_id));
       if (j.status === 'cancelled') {
-        idle('Conversion cancelled. The chapters already finished are kept.');
+        idle(T('Conversion cancelled. The chapters already finished are kept.'));
         return;
       }
       if (j.status === 'error') throw new Error(j.error || 'render failed');
@@ -3675,7 +3694,7 @@ function renderSeries() {
   const mine = book && (book.series || [])[0];
   sel.innerHTML = '';
   const none = document.createElement('option');
-  none.value = ''; none.textContent = 'No series';
+  none.value = ''; none.textContent = T('No series');
   sel.append(none);
   SERIES.forEach(s => {
     const o = document.createElement('option'); o.value = s.id;
@@ -3683,7 +3702,7 @@ function renderSeries() {
     sel.append(o);
   });
   const mk = document.createElement('option');
-  mk.value = NEW_SERIES; mk.textContent = '＋ Create series…';
+  mk.value = NEW_SERIES; mk.textContent = T('＋ Create series…');
   sel.append(mk);
   sel.value = mine ? mine.id : '';
   const ord = $('#sseriesord'), pos = $('#sseriespos');
@@ -3696,7 +3715,7 @@ function renderSeries() {
 }
 async function saveSeries(value) {
   if (!book) return;
-  $('#err').textContent = ''; busy('Saving the series…');
+  $('#err').textContent = ''; busy(T('Saving the series…'));
   try {
     const r = await jpost('/book/series', { book: book.id, series: value });
     book.series = (r.book || {}).series || [];
@@ -3709,7 +3728,7 @@ $('#sseries').onchange = async () => {
   if (v !== NEW_SERIES) { await saveSeries(v); return; }
   const name = (prompt('Name the series') || '').trim();
   if (!name) { renderSeries(); return; }
-  $('#err').textContent = ''; busy('Creating the series…');
+  $('#err').textContent = ''; busy(T('Creating the series…'));
   try {
     const r = await jpost('/series', { op: 'create', name });
     SERIES = r.series || [];
@@ -3735,8 +3754,8 @@ $('#ssavemeta').onclick = async () => {
   $('#err').textContent = '';
   const title = ($('#stitlein').value || '').trim();
   const author = ($('#sauthorin').value || '').trim();
-  if (!title) { fail(failure('A book needs a title.')); return; }
-  busy('Saving the details…');
+  if (!title) { fail(failure(T('A book needs a title.'))); return; }
+  busy(T('Saving the details…'));
   try {
     await jpost('/book/meta', { book: book.id, title, author });
     EDIT_META = false;
@@ -3749,7 +3768,7 @@ function renderSettings() {
     const img = document.createElement('img'); img.alt = '';
     img.src = coverURL(book.id, book.cover); prev.append(img);
   } else {
-    const d = document.createElement('div'); d.className = 'none'; d.textContent = 'No cover yet';
+    const d = document.createElement('div'); d.className = 'none'; d.textContent = T('No cover yet');
     prev.append(d);
   }
   // Looked-up metadata is authoritative until the reader says otherwise. With
@@ -3766,7 +3785,7 @@ function renderSettings() {
   const note = $('#smetanote');
   note.hidden = !locked;
   note.textContent = locked
-    ? 'These came from the ISBN. Press Edit to change them; your version then wins over any future lookup.'
+    ? T('These came from the ISBN. Press Edit to change them; your version then wins over any future lookup.')
     : '';
   renderSeries();
   $('#scovrmbtn').hidden = !(book && book.cover);
@@ -3798,12 +3817,13 @@ function renderCopies() {
   const vs = book ? bookVoices() : [];
   const note = $('#scopiesnote');
   if (!vs.length) {
-    note.textContent = 'Not voiced yet. Use Convert on this book to voice it'
+    note.textContent = T('Not voiced yet. Use Convert on this book to voice it')
       + (vlabel(PREFS.default_voice) ? ' in your default voice, ' + vlabel(PREFS.default_voice) + '.' : '.');
     $('#scopiesall').hidden = true;
     return;
   }
-  note.textContent = vs.length === 1 ? '1 voice on this book.' : vs.length + ' voices on this book.';
+  note.textContent = vs.length === 1 ? T('1 voice on this book.')
+    : T('{n} voices on this book.', { n: vs.length });
   vs.forEach(v => {
     const row = document.createElement('div');
     row.className = 'setrow'; row.style.alignItems = 'center';
@@ -3814,11 +3834,11 @@ function renderCopies() {
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'btn quiet'; btn.textContent = 'Remove';
     btn.onclick = async () => {
-      if (!confirm('Remove the ' + rlabel(v) + ' copy? The book and its other voices stay.')) return;
-      $('#err').textContent = ''; busy('Removing the voice…');
+      if (!confirm(T('Remove the {voice} copy? The book and its other voices stay.', { voice: rlabel(v) }))) return;
+      $('#err').textContent = ''; busy(T('Removing the voice…'));
       try { await jpost('/book/renditions/delete',
         { book: book.id, provider: v.provider, voice: v.voice, model: v.model });
-        await settingsReload('Removed the ' + rlabel(v) + ' copy.'); }
+        await settingsReload(T('Removed the {voice} copy.', { voice: rlabel(v) })); }
       catch (err) { fail(err); }
     };
     row.append(lab, btn); box.append(row);
@@ -3835,17 +3855,17 @@ $('#scovdone').onclick = () => { $('#settingsdlg').hidden = true; };
 $('#sfetch').onclick = async () => {
   if (!book) return;
   const isbn = ($('#sisbn').value || '').trim();
-  $('#err').textContent = ''; $('#snote').textContent = ''; busy('Looking up the book…');
+  $('#err').textContent = ''; $('#snote').textContent = ''; busy(T('Looking up the book…'));
   try {
     await jpost('/book/details', { book: book.id, isbn });
     await settingsReload('Details updated.');
-    $('#snote').textContent = 'Fetched from OpenLibrary.';
+    $('#snote').textContent = T('Fetched from OpenLibrary.');
   } catch (err) { fail(err); }
 };
 $('#scovurlbtn').onclick = async () => {
   const url = ($('#scovurl').value || '').trim();
   if (!url || !book) return;
-  $('#err').textContent = ''; busy('Setting the cover…');
+  $('#err').textContent = ''; busy(T('Setting the cover…'));
   try { await jpost('/cover', { book: book.id, url }); $('#scovurl').value = '';
     await settingsReload('Cover set.'); }
   catch (err) { fail(err); }
@@ -3853,7 +3873,7 @@ $('#scovurlbtn').onclick = async () => {
 $('#scovfilebtn').onclick = () => { if (book) $('#scovfile').click(); };
 $('#scovfile').onchange = async e => {
   const f = e.target.files && e.target.files[0]; e.target.value = '';
-  if (!f || !book) return; $('#err').textContent = ''; busy('Setting the cover…');
+  if (!f || !book) return; $('#err').textContent = ''; busy(T('Setting the cover…'));
   try {
     const data_b64 = await fileB64(f);
     await jpost('/cover', { book: book.id, data_b64, mime: f.type || 'image/jpeg' });
@@ -3861,7 +3881,7 @@ $('#scovfile').onchange = async e => {
   } catch (err) { fail(err); }
 };
 $('#scovautobtn').onclick = async () => {
-  if (!book) return; $('#err').textContent = ''; busy('Looking for a cover…');
+  if (!book) return; $('#err').textContent = ''; busy(T('Looking for a cover…'));
   try {
     const isbn = ($('#sisbn').value || '').trim();
     await jpost('/cover/auto', { book: book.id, isbn });
@@ -3869,28 +3889,30 @@ $('#scovautobtn').onclick = async () => {
   } catch (err) { fail(err); }
 };
 $('#scovrmbtn').onclick = async () => {
-  if (!book) return; $('#err').textContent = ''; busy('Removing the cover…');
+  if (!book) return; $('#err').textContent = ''; busy(T('Removing the cover…'));
   try { await jpost('/cover/clear', { book: book.id }); await settingsReload('Cover removed.'); }
   catch (err) { fail(err); }
 };
 $('#srmallbtn').onclick = async () => {
   if (!book) return;
-  if (!confirm('Remove every voice from ' + (book.title || 'this book') + '? The book and its text stay.')) return;
-  $('#err').textContent = ''; busy('Removing every voice…');
+  if (!confirm(T('Remove every voice from {book}? The book and its text stay.',
+    { book: book.title || T('this book') }))) return;
+  $('#err').textContent = ''; busy(T('Removing every voice…'));
   try { await jpost('/book/renditions/delete', { book: book.id, all: true });
-    await settingsReload('Removed every voice.'); }
+    await settingsReload(T('Removed every voice.')); }
   catch (err) { fail(err); }
 };
 $('#sdelbookbtn').onclick = async () => {
   if (!book) return;
-  if (!confirm('Remove ' + (book.title || 'this book') + ' from your library? Its voices go with it.')) return;
-  $('#err').textContent = ''; busy('Removing the book…');
+  if (!confirm(T('Remove {book} from your library? Its voices go with it.',
+    { book: book.title || T('this book') }))) return;
+  $('#err').textContent = ''; busy(T('Removing the book…'));
   try {
     await jpost('/book/delete', { book: book.id });
     $('#settingsdlg').hidden = true;
     book = null; cur = -1;
     await loadLibrary();
-    show('lib'); idle('Book removed.');
+    show('lib'); idle(T('Book removed.'));
   } catch (err) { fail(err); }
 };
 
@@ -3939,10 +3961,10 @@ async function playSelection(bk, idx, autoplay = true) {
   const viewed = !!(book && book.id === bk.id);
   if (!rd || !rd.audio_ref) {
     if (viewed) { cur = idx; renderPlay(); loadText(idx); }
-    idle('Not converted in this voice yet.'); return;
+    idle(T('Not converted in this voice yet.')); return;
   }
   if (viewed) { state[idx] = cache.has(rd.audio_ref) ? 'ready' : 'down'; drawSpine(); }
-  busy((autoplay ? 'Downloading chapter ' : 'Loading chapter ') + (idx + 1) + '…');
+  busy(autoplay ? T('Downloading chapter {n}…', { n: idx + 1 }) : T('Loading chapter {n}…', { n: idx + 1 }));
   try {
     const e = await fetchChapter(bk.id, idx, rd.audio_ref, rd.audio_bytes, rd);
     const a = $('#audio'); a.src = e.url; bookSrc = a.src;
@@ -3993,6 +4015,7 @@ function sayState() {
       ? ($a.paused ? 'Paused. ' : 'Playing. ') : '') +
     player.title +
     (ch ? ', chapter ' + (ch.idx + 1) + ' of ' + total : '');
+}
 // step to the nearest chapter (in `dir`) that has audio in the current voice
 function chapterStep(dir) {
   if (!player.id || pcur < 0) return;
@@ -4081,7 +4104,7 @@ $a.addEventListener('ended', () => {
   if (r && r.audio_ref) { playSelection(player, nx); return; }
   const nqb = queueNext();
   if (nqb) { idle('Finished ' + (player.title || 'the book') + ' — loading ' + (nqb.title || 'the next book') + '.'); loadBook(nqb.id); return; }
-  idle('Paused at the next chapter (not voiced in this voice yet).');
+  idle(T('Paused at the next chapter (not voiced in this voice yet).'));
 });
 let stopTimer = null;
 function pollStop() {
@@ -4090,7 +4113,7 @@ function pollStop() {
     if (!player.id) return;
     try { const d = await api('/stop?user=' + encodeURIComponent(USER) + '&book=' + encodeURIComponent(player.id) + '&device=' + DEVICE);
       if (d.stop) { $a.pause(); await savePosition();
-        await jpost('/ack', { user: USER, book: player.id, device: DEVICE }); idle('Stopped — another device took over.'); } }
+        await jpost('/ack', { user: USER, book: player.id, device: DEVICE }); idle(T('Stopped — another device took over.')); } }
     catch (_) {}
   }, 5000);
 }
@@ -4107,9 +4130,9 @@ function saveQueue() { try { localStorage.setItem(QKEY, JSON.stringify(queue)); 
 function queueIndexOf(id) { return queue.findIndex(q => q.id === id); }
 function queueAdd(id) {
   if (!id) return;
-  if (queueIndexOf(id) >= 0) { idle('Already in the queue.'); return; }
+  if (queueIndexOf(id) >= 0) { idle(T('Already in the queue.')); return; }
   const b = bookById(id); queue.push({ id, title: (b && b.title) || id });
-  saveQueue(); renderQueue(); idle('Added to the queue.');
+  saveQueue(); renderQueue(); idle(T('Added to the queue.'));
 }
 function queueRemove(id) { queue = queue.filter(q => q.id !== id); saveQueue(); renderQueue(); }
 function queueMove(id, dir) {
@@ -4129,9 +4152,9 @@ function renderQueue() {
     const row = document.createElement('div'); row.className = 'qrow' + (q.id === player.id ? ' cur' : '');
     const n = document.createElement('span'); n.className = 'qi'; n.textContent = (i + 1);
     const t = document.createElement('span'); t.className = 'qt'; t.textContent = q.title || q.id;
-    const up = document.createElement('button'); up.type = 'button'; up.textContent = '↑'; up.title = 'Move up';
+    const up = document.createElement('button'); up.type = 'button'; up.textContent = '↑'; up.title = T('Move up');
     up.onclick = () => queueMove(q.id, -1);
-    const dn = document.createElement('button'); dn.type = 'button'; dn.textContent = '↓'; dn.title = 'Move down';
+    const dn = document.createElement('button'); dn.type = 'button'; dn.textContent = '↓'; dn.title = T('Move down');
     dn.onclick = () => queueMove(q.id, 1);
     const rm = document.createElement('button'); rm.type = 'button'; rm.textContent = '×'; rm.title = 'Remove';
     rm.onclick = () => queueRemove(q.id);
@@ -4149,7 +4172,7 @@ $('#queueadd').onclick = () => { if (book) queueAdd(book.id); };
 $('#qclear').onclick = () => { queue = []; saveQueue(); renderQueue(); };
 $('#qplay').onclick = () => {
   const first = queue[0] || (book ? { id: book.id } : null);
-  if (!first) { idle('The queue is empty.'); return; }
+  if (!first) { idle(T('The queue is empty.')); return; }
   toggleQueue(false); loadBook(first.id);
 };
 $('#loadbook').onclick = () => { if (book) loadBook(book.id); };
@@ -4236,7 +4259,7 @@ async function sbLoadVoices() {
 
 async function sbSpeak(voice) {
   const text = ($('#sbtext').value || '').trim();
-  if (!text) { fail('type something first'); return null; }
+  if (!text) { fail(T('type something first')); return null; }
   const r = await api('/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, connection_id: $('#sbconn').value, voice,
       speed: parseFloat($('#sbspeed').value || '1') }) });
@@ -4245,8 +4268,8 @@ async function sbSpeak(voice) {
 
 async function sbSay() {
   const v = $('#sbvoice').value;
-  if (!v) { fail('pick a voice first'); return; }
-  busy('Rendering that line…');
+  if (!v) { fail(T('pick a voice first')); return; }
+  busy(T('Rendering that line…'));
   try {
     const blob = await sbSpeak(v);
     if (!blob) { idle(''); return; }
@@ -4270,7 +4293,7 @@ function sbStopScan(quiet) {
 async function sbScanRun() {
   if (sbScan) { sbStopScan(); return; }
   const voices = SB_VOICES.slice();
-  if (!voices.length) { fail('no voices to scan'); return; }
+  if (!voices.length) { fail(T('no voices to scan')); return; }
   const chars = Math.min(($('#sbtext').value || '').trim().length, 1000);
   const est = chars * voices.length;
   if (est > 20000 && !confirm('Scanning ' + voices.length + ' voices sends about '
@@ -4282,7 +4305,7 @@ async function sbScanRun() {
 
 async function sbScanStep() {
   if (!sbScan) return;
-  if (sbScan.i >= sbScan.voices.length) { sbStopScan(true); sbStatus('Scan done.'); return; }
+  if (sbScan.i >= sbScan.voices.length) { sbStopScan(true); sbStatus(T('Scan done.')); return; }
   const v = sbScan.voices[sbScan.i];
   const label = v.label || v.id;
   $('#sbvoice').value = v.id;
@@ -4360,9 +4383,9 @@ window.addEventListener('appinstalled', () => {
 function installHint() {
   const ua = navigator.userAgent || '';
   const iOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  if (iOS) return 'Tap Share (the square with the up arrow), then Add to Home Screen.';
-  if (/Firefox\//.test(ua)) return 'Open the browser menu, then Add to home screen.';
-  return 'Open the browser menu, then Install app or Add to Home screen.';
+  if (iOS) return T('Tap Share (the square with the up arrow), then Add to Home Screen.');
+  if (/Firefox\//.test(ua)) return T('Open the browser menu, then Add to home screen.');
+  return T('Open the browser menu, then Install app or Add to Home screen.');
 }
 {
   const b = $('#menuinstall');
@@ -4373,7 +4396,7 @@ function installHint() {
       INSTALL.prompt(); try { await INSTALL.userChoice; } catch (_) {}
       INSTALL = null; b.hidden = true; return;
     }
-    toast('ok', 'Add fireside to your home screen. ' + installHint());
+    toast('ok', T('Add fireside to your home screen.') + ' ' + installHint());
   };
 }
 // The system player (lockscreen, notification shade, headset buttons) reads this.

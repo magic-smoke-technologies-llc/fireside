@@ -10,6 +10,7 @@ so a bare `def test_x()` is collected by nothing and reports nothing.
 """
 import json
 import os
+import sys
 import pathlib
 import re
 import tempfile
@@ -152,3 +153,52 @@ class TestSpanishPage(unittest.TestCase):
         status, body = self.get("/")
         assert status == 200
         assert '<html lang="en" dir="ltr"' in body
+
+
+class TestScriptStringsAreTranslated(unittest.TestCase):
+    """The half of the page that is script.
+
+    Markup is rendered server-side, so the catalog reached it. A sentence drawn
+    by JS reached nobody: T() exists, the catalog did not, so every toast,
+    confirm dialog and inline error stayed English in Spanish. This checks the
+    keys the script asks for, not the count of keys the catalog holds.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import i18n_extract
+        self.ex = i18n_extract
+        self.page = (ROOT / "ui" / "index.html").read_text(encoding="utf-8")
+
+    def keys(self):
+        return self.ex.script_strings(self.page)
+
+    def test_the_page_draws_something_in_script(self):
+        keys = self.keys()
+        # A guard against the extractor quietly matching nothing and the rest
+        # of these tests passing on an empty list.
+        assert len(keys) > 50, len(keys)
+
+    def test_every_script_key_has_both_catalogs(self):
+        en = _load("en")["messages"]
+        es = _load("es")["messages"]
+        missing = [k for k in self.keys() if k not in en or k not in es]
+        assert not missing, "unreachable in Spanish: %r" % missing[:8]
+
+    def test_the_catalog_carries_no_key_the_page_stopped_using(self):
+        # A renamed string that keeps its old entry is how a catalog rots.
+        from html import unescape
+        _src, f = self.ex.analyse()
+        used = {unescape(v) for _t, v in f.simple}
+        used |= {unescape(v) for _n, v in f.attrs}
+        used |= set(self.keys())
+        en = _load("en")["messages"]
+        unused = sorted(k for k in en if k not in used and k not in self.page)
+        assert not unused, "stale entries: %r" % unused[:8]
+
+    def test_js_escapes_decode_so_the_key_matches_at_runtime(self):
+        # The literal in the page is 'Opening the payment page\u2026'; at runtime
+        # T() receives the ellipsis, so the key has to be the decoded form.
+        keys = self.keys()
+        assert "Opening the payment page…" in keys
+        assert not [k for k in keys if "\\u" in k]
