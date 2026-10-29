@@ -512,6 +512,7 @@
           <p class="small" id="npkicker"></p>
           <h2 id="nptitle"></h2>
           <p class="small" id="npauthor" style="margin-top:4px" hidden></p>
+          <p class="small" id="npsource" style="margin-top:2px" hidden><span data-t="From">From</span> <a id="npsrclink" target="_blank" rel="noopener noreferrer"></a></p>
           <p class="small" id="npimprint" style="margin-top:2px" hidden></p>
           <p class="sub" id="npdesc" style="margin-top:8px" hidden></p>
           <div id="nptext" style="margin-top:16px"></div>
@@ -3056,7 +3057,8 @@ async function openBook(id, jumpPlay) {
     book = { id, title: bk.title || meta.title, cover: bk.cover || '',
              isbn: bk.isbn || '', author: bk.author || '',
              description: bk.description || '', publisher: bk.publisher || '',
-             published: bk.published || '', chapters: prog.chapters || [] };
+             published: bk.published || '', chapters: prog.chapters || [],
+             url: bk.url || '', source: bk.source || '' };
     await syncBookAudio(id, prev, book.chapters);
     SELECT.clear();
     selVoice = defaultVoiceKey();       // the newest voice, until the reader picks another
@@ -3142,6 +3144,16 @@ function renderPlay() {
   renderCover();
   const au = $('#npauthor'), de = $('#npdesc'), im = $('#npimprint');
   if (au) { au.textContent = book.author || ''; au.hidden = !book.author; }
+  // Attribution: a work pulled from the web names the site it was read from,
+  // and the link goes back to the original. A book with no source url (an
+  // upload, an epub) says nothing rather than inventing a credit.
+  const sr = $('#npsource'), srlink = $('#npsrclink');
+  if (sr && srlink) {
+    let host = '';
+    try { host = new URL(book.url || '').hostname.replace(/^www\./, ''); } catch (_) { host = ''; }
+    sr.hidden = !host;
+    if (host) { srlink.href = book.url; srlink.textContent = host; }
+  }
   // The edition line: publisher and year, from the same record the settings
   // panel edits. Composed in the script rather than the markup so an unknown
   // half does not leave a dangling separator on the page.
