@@ -171,6 +171,7 @@ into real plugin packages, not adapters over `sources/<site>.py`.
 
     plugins/reader/epub/plugin.py         uploads
     plugins/reader/ao3/plugin.py          AO3 works (browser transport + cookie)
+    plugins/reader/keiramarcos/plugin.py  keiramarcos.com: bundle pages hold chapters
     plugins/reader/quantumbang/plugin.py  a story split across numbered pages
     plugins/reader/web/plugin.py          any other http(s) link (fallback)
 

@@ -1,0 +1,9 @@
+{
+  "id": "keiramarcos",
+  "kind": "reader",
+  "label": "Keira Marcos story",
+  "version": "1.0",
+  "entry": "plugin.py",
+  "class": "Keiramarcos",
+  "order": 25
+}

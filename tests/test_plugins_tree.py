@@ -20,7 +20,7 @@ class TestReaderTree(unittest.TestCase):
         ids = [p.id for p in discover("reader", PLUGINS)]
         # pdf first: its magic bytes are unambiguous. Then docx before epub,
         # because both are zips and the docx reader asks a narrower question.
-        self.assertEqual(ids, ["pdf", "docx", "epub", "ao3", "quantumbang", "web"])
+        self.assertEqual(ids, ["pdf", "docx", "epub", "ao3", "keiramarcos", "quantumbang", "web"])
 
     def test_reader_objects_expose_the_contract(self):
         for p in discover("reader", PLUGINS):
