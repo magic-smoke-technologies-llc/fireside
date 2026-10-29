@@ -420,7 +420,7 @@ class App:
         try:
             book = plugin.obj.read(req, self._make_fetch(plugin.obj, cred), cred)
         except contracts.Refused as e:
-            return e.status, e.payload()
+            return e.status, self._refusal(e, user, plugin)
         parsed = (getattr(book, "meta", None) or {}).get("draft")
         if not parsed:
             # A reader that does not produce a block-level draft (epub, ao3, web)
@@ -452,7 +452,7 @@ class App:
         except contracts.Refused as e:
             # A plugin that can read the file but not turn it into a book says
             # so in its own words. That is a 422 with a reason, not a 500.
-            return e.status, e.payload()
+            return e.status, self._refusal(e, user, plugin)
         # Whatever identity the reader named, this account either already holds
         # that work or it does not. Importing again is a replace, not a second
         # copy: two of the same book on one shelf is a mistake, not a collection.
@@ -500,6 +500,122 @@ class App:
         self._maybe_cover(bid, book)
         return 200, {"book_id": bid, "title": getattr(book, "title", ""),
                      "chapters": len(getattr(book, "chapters", []))}
+
+    def _refusal(self, e, user, plugin):
+        """A plugin's refusal, made useful before it reaches the page.
+
+        A series page is refused because it is several books, and the useful
+        answer is the list, not the sentence. Whichever of them this account
+        already holds is marked here, from the local shelf, so the picker can
+        say so without opening any of them.
+        """
+        out = e.payload()
+        ser = out.get("series")
+        if isinstance(ser, dict) and isinstance(ser.get("works"), list):
+            for w in ser["works"]:
+                if not isinstance(w, dict):
+                    continue
+                hit = library.find_same(self.conn, user,
+                                        {"url": w.get("url")}, plugin.obj)
+                if hit:
+                    held = library.get_book(self.conn, hit) or {}
+                    w["existing"] = {"book_id": hit,
+                                     "title": held.get("title") or ""}
+        return out
+
+    def import_series(self, q, body):
+        """Import the works a person picked out of a series page.
+
+        The list comes from the page, not from the request: this re-reads the
+        page through the same reader and imports only URLs that page links to,
+        so a picker can never become a way to fetch an arbitrary address. Each
+        work is imported by the ordinary import path, one at a time, so every
+        rule that applies to a single book (duplicate, quota, replace) applies
+        here unchanged; what fails is reported per work instead of failing the
+        batch. The books that land are put in one series container, in page
+        order, so the shelf reads in the author's order rather than by import
+        time.
+        """
+        user = self._uid(q, body)
+        page_url = (body.get("url") or "").strip()
+        req = {"kind": "url", "url": page_url}
+        plugin = self._pick_reader(req)
+        if plugin is None:
+            return 400, self._no_reader(req)
+        cred = self._source_cred(user, plugin.id, body.get("cred"))
+        reader = plugin.obj
+        try:
+            found = reader.series(req, self._make_fetch(reader, cred), cred)
+        except contracts.Refused as e:
+            return e.status, self._refusal(e, user, plugin)
+        if not isinstance(found, dict) or not found.get("works"):
+            return 422, {"error": "not a series page",
+                         "detail": "that page does not list works of its own"}
+        works = found["works"]
+        picked = [str(u) for u in (body.get("picks") or [])]
+        if not picked:
+            return 400, {"error": "nothing picked",
+                         "detail": "choose at least one work to pull"}
+        by_url = {w["url"]: w for w in works if isinstance(w, dict)}
+        # Page order, not request order: the shelf reads in the author's order
+        # because this is a series, not a pile of books that arrived together.
+        chosen = [w for w in works if isinstance(w, dict) and w["url"] in picked]
+        unknown = [u for u in picked if u not in by_url]
+        if not chosen:
+            return 400, {"error": "nothing picked",
+                         "detail": "none of those are on that page",
+                         "unknown": unknown}
+        done, failed = [], []
+        for w in chosen:
+            row = {"url": w["url"], "title": w.get("title") or "",
+                   "words": w.get("words")}
+            # One broken work must not take the batch down with it: a page the
+            # site changed, a story that is now a login wall. The rest still land.
+            try:
+                status, out = self.import_book(
+                    q, dict(body, kind="url", url=w["url"]))
+            except Exception as e:                    # noqa: BLE001
+                row.update({"error": "could not read this work",
+                            "detail": str(e)[:300]})
+                failed.append(row)
+                continue
+            if status == 200 and out.get("book_id"):
+                row.update({"book_id": out["book_id"],
+                            "chapters": out.get("chapters"),
+                            "replaced": bool(out.get("replaced"))})
+                done.append(row)
+            elif status == 409 and (out.get("existing") or {}).get("book_id"):
+                # already on the shelf: not a failure, and still this series'
+                row.update({"book_id": out["existing"]["book_id"],
+                           "already": True})
+                done.append(row)
+            else:
+                row.update({"error": out.get("error") or "import failed",
+                            "detail": out.get("detail") or ""})
+                failed.append(row)
+        name = " ".join(str(found.get("title") or "").split())[:120]
+        container = None
+        if name and done:
+            container = self._series_container(user, name,
+                                              [r["book_id"] for r in done])
+        return 200, {"title": name or "Series", "series": container,
+                     "imported": done, "failed": failed,
+                     "unknown": unknown}
+
+    def _series_container(self, user, name, book_ids):
+        """The series these books belong to, by name: reused if it exists."""
+        sid = None
+        for s in library.list_series(self.conn, user):
+            if (s.get("name") or "").casefold() == name.casefold():
+                sid = s["id"]
+                break
+        if not sid:
+            sid = library.create_series(self.conn, user, name)
+        if not sid:
+            return None
+        for bid in book_ids:
+            library.set_book_series(self.conn, user, bid, sid)
+        return {"id": sid, "name": name, "books": len(book_ids)}
 
     def _example_voice(self):
         """The free voice the example is pre-rendered in: the sale connection
@@ -2524,7 +2640,8 @@ GET_ROUTES = {
     "/storage": "storage_get",
 }
 POST_ROUTES = {
-    "/import": "import_book", "/import/preview": "preview_import", "/book/example": "add_example_book",
+    "/import": "import_book", "/import/preview": "preview_import",
+    "/import/series": "import_series", "/book/example": "add_example_book",
     "/render": "render", "/voices": "voices",
     "/book/renditions/delete": "remove_renditions", "/book/delete": "delete_book",
     "/account/delete": "account_delete",

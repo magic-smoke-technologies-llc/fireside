@@ -146,6 +146,17 @@ class Reader:
     def transport(self) -> Dict[str, Any]:
         return {}
 
+    def series(self, req, fetch, cred) -> Optional[Dict[str, Any]]:
+        """What this URL holds when it holds several works: {title, page, works}.
+
+        Optional, and optional for a reason: a series page is the one page a
+        reader cannot turn into one book. A reader that has such pages raises
+        Refused(series=...) from read(), and answers this method so the host can
+        re-read the page and import only what the page itself links to. A reader
+        with no such shape returns None and never implements it.
+        """
+        return None
+
     def consent(self, req) -> Consent:
         return Consent(True)
 
