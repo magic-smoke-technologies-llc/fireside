@@ -124,6 +124,27 @@ class Base(unittest.TestCase):
         return imp["book_id"]
 
 
+class TestSourceAttribution(Base):
+    def test_the_payload_carries_where_the_work_came_from(self):
+        import json as _json
+        bid = self.import_book()
+        self.conn.execute("UPDATE books SET source_json=? WHERE id=?",
+                          (_json.dumps({"source": "keiramarcos",
+                                        "url": "https://keiramarcos.com/fan-fiction/x/"}),
+                           bid))
+        self.conn.commit()
+        s, out = self.app.progress({"user": "u1", "book": bid}, {})
+        self.assertEqual(s, 200)
+        self.assertEqual(out["book"]["source"], "keiramarcos")
+        self.assertEqual(out["book"]["url"], "https://keiramarcos.com/fan-fiction/x/")
+
+    def test_an_upload_names_no_site(self):
+        bid = self.import_book()
+        s, out = self.app.progress({"user": "u1", "book": bid}, {})
+        self.assertEqual(out["book"]["url"], "")
+        self.assertEqual(out["book"]["source"], "")
+
+
 class TestLegal(unittest.TestCase):
     def setUp(self):
         self.app = App(db_path=":memory:")

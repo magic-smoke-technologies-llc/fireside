@@ -429,6 +429,15 @@ class TestBookPageConvert(unittest.TestCase):
         self.assertIn("nf(bookChars)", html)
         self.assertIn("nf(selChars)", html)
 
+    def test_play_page_credits_the_site_a_work_was_read_from(self):
+        # a pulled work names its origin on the play page. The line is static
+        # markup with a static word ("From") so it is translatable; only the
+        # host and the link are filled in from the book's own metadata.
+        html = self._html()
+        self.assertIn('id="npsource"', html)
+        self.assertIn('id="npsrclink"', html)
+        self.assertIn('data-t="From"', html)
+
     def test_book_page_has_book_settings_panel(self):
         # one settings panel holds the metadata and the cover controls; the
         # lone "Set cover" button is gone.

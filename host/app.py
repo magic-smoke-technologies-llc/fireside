@@ -953,8 +953,14 @@ class App:
 
     def _book_payload(self, book_id):
         b = library.get_book(self.conn, book_id) or {}
+        meta = b.get("meta") or {}
         return {"id": book_id, "title": b.get("title", ""),
                 "author": b.get("author", ""), "cover": b.get("cover", ""),
+                # where the work came from, so the play page can credit it: the
+                # reader named both when it read the book, and this is only a
+                # pass-through of that (an upload has neither).
+                "url": meta.get("url", "") or "",
+                "source": meta.get("source", "") or "",
                 "isbn": b.get("isbn", ""), "publisher": b.get("publisher", ""),
                 "published": b.get("published", ""),
                 "description": b.get("description", ""),
