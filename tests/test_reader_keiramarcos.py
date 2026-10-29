@@ -165,6 +165,22 @@ class TestParse(unittest.TestCase):
             km.Keiramarcos().read({"kind": "url", "url": url},
                                  FakeFetch({url: thin, km.landing_of(url): thin}))
 
+    def test_a_series_page_is_refused_by_name_not_folded_into_one_book(self):
+        from host.contracts import Refused
+        series = """<html><body><h1 class="entry-title">Hold My Coffee (Series)</h1>
+<div class="entry-content"><div class="responsive-tabs">
+<h2 class="tabtitle">Stories</h2><div class="tabcontent">
+<h1><a href="https://keiramarcos.com/2017/02/a-caged-tiger/">1. A Caged Tiger</a></h1>
+<h1><a href="https://keiramarcos.com/2017/02/an-empty-coffin/">2. An Empty Coffin</a></h1>
+</div><h2 class="tabtitle">Cast</h2><div class="tabcontent">
+<a href="https://keiramarcos.com/fan-fiction/x/holdmycoffee/johnsheppard/">John</a>
+</div></div></div></body></html>"""
+        url = "https://keiramarcos.com/fan-fiction/stargate-atlantis-fan-fiction/holdmycoffee/"
+        with self.assertRaises(Refused) as ctx:
+            km.Keiramarcos().read({"kind": "url", "url": url}, FakeFetch({url: series}))
+        self.assertEqual(ctx.exception.status, 422)
+        self.assertIn("a-caged-tiger", ctx.exception.detail)
+
     def test_a_stored_copy_from_a_bundle_link_is_the_same_work(self):
         k = km.Keiramarcos()
         self.assertTrue(k.same({"url": P1}, {"url": WORK}))

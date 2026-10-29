@@ -36,7 +36,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from host.contracts import to_book
+from host.contracts import Refused, to_book
 from host.textutil import clean_fragment, strip_furniture
 
 HOSTS = ("keiramarcos.com",)
@@ -214,6 +214,25 @@ def part_links(page: str, url: str) -> dict:
     return found
 
 
+def series_works(page: str, url: str) -> list:
+    """The works a series landing page lists, in page order.
+
+    A ~Series~ page is not one story: its Stories tab links out to N unrelated
+    posts, each a whole work of its own. They are told apart from bundle pages
+    because their slugs carry no -N-M part marker and their family is not this
+    page's family."""
+    here = family_of(url)
+    out = []
+    for link in story_tab_links(page, url):
+        if not is_post_url(link):
+            continue
+        fam, n, _of = split_part(last_segment(link))
+        if n is not None or fam == here:
+            continue
+        out.append(link)
+    return out
+
+
 def ordered_parts(found: dict, url: str) -> list:
     """Parts 1..of in order, for the most complete consistent run. Falls back to
     whatever was linked, in part order, when the run is not whole."""
@@ -322,6 +341,15 @@ class Keiramarcos:
         start_url, start_page = first
         pages[start_url] = start_page
 
+        works = series_works(start_page, start_url)
+        if len(works) >= 2:
+            # one import, one book. A series page is several books, and the
+            # honest answer is to name them rather than fold them into one.
+            raise Refused(
+                "that is a series page",
+                "this page lists %d works of its own. Open one of them and paste "
+                "that link, or paste a work's page: %s"
+                % (len(works), works[0]), status=422)
         found = part_links(start_page, start_url)
         ordered = ordered_parts(found, start_url) if found else [start_url]
         if is_post_url(url) and url not in ordered:
