@@ -258,6 +258,54 @@ class TestParse(unittest.TestCase):
         self.assertIsNone(km.Keiramarcos().series(
             {"kind": "url", "url": WORK}, FakeFetch(dict(PAGES))))
 
+    # An older shape, still live: no tabs at all, and the one work is linked by
+    # WordPress shortlink. Ring of Fire (2011) is the page that caught this.
+    OLD_SERIES = """<html><body><h1 class="entry-title">Ring of Fire (series)</h1>
+<div class="entry-content"><p>Series Summary: John and Rodney face obstacles.</p>
+<ol><li><a title="And the Stars Burn" href="https://keiramarcos.com/?p=2937">And the Stars Burn </a>(32,017 words)<br /></li></ol>
+</div></body></html>"""
+    OLD_URL = "https://keiramarcos.com/fan-fiction/stargate-atlantis-fan-fiction/ring-of-fire/"
+    SHORT = "https://keiramarcos.com/?p=2937"
+    CANON = "https://keiramarcos.com/2011/02/ring-of-fire-and-the-stars-burn/"
+
+    def test_a_shortlink_on_a_page_with_no_tabs_is_still_a_work(self):
+        items = km.series_items(self.OLD_SERIES, self.OLD_URL)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["url"], self.SHORT)
+        self.assertEqual(items[0]["title"], "And the Stars Burn")
+        self.assertEqual(items[0]["words"], 32017)
+
+    def test_a_series_holding_one_work_reads_that_work(self):
+        page = post("Ring of Fire: And the Stars Burn", ["Chapter One"]).replace(
+            "<title>", '<link rel="canonical" href="%s" /><title>' % self.CANON)
+        book = km.Keiramarcos().read(
+            {"kind": "url", "url": self.OLD_URL},
+            FakeFetch({self.OLD_URL: self.OLD_SERIES, self.SHORT: page}))
+        self.assertEqual(len(book.chapters), 1)
+        self.assertEqual(book.meta["identity"], km.identity_of(self.CANON))
+
+    def test_the_shortlink_is_not_the_name_of_the_book(self):
+        """Two ways in are one story: identity comes from the page's own address."""
+        page = post("Ring of Fire: And the Stars Burn", ["Chapter One"]).replace(
+            "<title>", '<link rel="canonical" href="%s" />\n<title>' % self.CANON)
+        book = km.Keiramarcos().read({"kind": "url", "url": self.SHORT},
+                                     FakeFetch({self.SHORT: page}))
+        self.assertEqual(book.meta["url"], self.CANON)
+        self.assertEqual(book.meta["identity"],
+                         km.identity_of(self.CANON))
+        self.assertNotEqual(book.meta["identity"], km.identity_of(self.SHORT))
+
+    def test_a_work_page_that_mentions_a_sister_story_is_not_a_series(self):
+        """No "(Series)" in the title, no following the one link it lists."""
+        page = """<html><body><h1 class="entry-title">Shattered</h1>
+<div class="entry-content"><p>Thanks for reading.</p>
+<ol><li><a href="https://keiramarcos.com/2011/02/ring-of-fire-and-the-stars-burn/">And the Stars Burn </a>(32,017 words)</li></ol>
+</div></body></html>"""
+        url = "https://keiramarcos.com/fan-fiction/shattered/"
+        self.assertFalse(km.series_marked(page))
+        self.assertEqual([i["url"] for i in km.series_items(page, url)],
+                         ["https://keiramarcos.com/2011/02/ring-of-fire-and-the-stars-burn/"])
+
     def test_a_stored_copy_from_a_bundle_link_is_the_same_work(self):
         k = km.Keiramarcos()
         self.assertTrue(k.same({"url": P1}, {"url": WORK}))
