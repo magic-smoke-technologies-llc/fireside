@@ -289,6 +289,14 @@
   /* add belongs on the library screen */
   .addpanel{margin-top:16px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
   .addpanel[hidden]{display:none}
+  /* a series page is a shelf of its own: list what is there, let them pick */
+  .serlist{margin-top:12px;display:flex;flex-direction:column;gap:2px;max-height:44vh;overflow:auto}
+  .serrow{display:flex;align-items:flex-start;gap:10px;padding:8px 6px;border-radius:8px;cursor:pointer}
+  .serrow:hover{background:var(--raise)}
+  .serrow input{margin-top:3px;flex:0 0 auto}
+  .serrow .sert{color:var(--fg)}
+  .serrow .serm{display:block;color:var(--faint);font-size:12px}
+  .serrow.have .sert{color:var(--soft)}
   /* get started: the first-run guide, on an empty or unvoiced library */
   .welcome{margin-top:24px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
   .welcome[hidden]{display:none}
@@ -485,6 +493,15 @@
           <button class="btn" id="dupgo" type="button" data-t="Replace it">Replace it</button>
           <button class="btn quiet" id="dupkeep" type="button" data-t="Keep both">Keep both</button>
           <button class="btn quiet" id="dupcancel" type="button" data-t="Cancel">Cancel</button>
+        </div>
+      </div>
+      <div class="addpanel" id="serpick" hidden style="margin-top:12px">
+        <p class="sub" id="sertitle"></p>
+        <div class="serlist" id="serlist" role="group" aria-label="Works on this page" data-t-aria="Works on this page"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn quiet" id="serall" type="button" data-t="Select all">Select all</button>
+          <button class="btn" id="serpull" type="button" data-t="Pull selected">Pull selected</button>
+          <button class="btn quiet" id="sercancel" type="button">Cancel</button>
         </div>
       </div>
       <p class="hint" data-t="A locked AO3 work needs your cookie under Settings, or drop the work&#x27;s EPUB.">A locked AO3 work needs your cookie under Settings, or drop the work's EPUB.</p>
@@ -2774,7 +2791,7 @@ function fileB64(f) { return new Promise((res, rej) => { const r = new FileReade
 let PENDING_IMPORT = null;
 function clearDup() { PENDING_IMPORT = null; const n = $('#dupnote'); if (n) n.hidden = true; }
 async function doImport(payload, note) {
-  clearDup();
+  clearDup(); clearSeries();
   if (note) busy(note);
   try {
     const d = await jpost('/import', Object.assign({ user: USER }, payload));
@@ -2786,6 +2803,7 @@ async function doImport(payload, note) {
     } else { idle(''); }
   } catch (e) {
     if (e.status === 409 && e.data && e.data.existing) { askReplace(payload, e.data.existing); return; }
+    if (e.data && e.data.series && (e.data.series.works || []).length) { showSeries(e.data.series); return; }
     fail(e);
   }
 }
@@ -2804,6 +2822,73 @@ $('#dupgo').onclick = () => { if (!PENDING_IMPORT) return; const p = PENDING_IMP
 $('#dupkeep').onclick = () => { if (!PENDING_IMPORT) return; const p = PENDING_IMPORT;
   doImport(Object.assign({}, p, { keep_both: true }), 'Adding a second copy…'); };
 $('#dupcancel').onclick = () => { clearDup(); idle(''); };
+
+// A series page is several books, not one. The page already says what they are
+// (title, word count, how many parts), so show that list and let the person
+// choose: pulling eight books onto a shelf uninvited is its own kind of rude,
+// and making them paste links one at a time is what they came here to stop.
+let PENDING_SERIES = null;
+function clearSeries() { PENDING_SERIES = null; const n = $('#serpick'); if (n) n.hidden = true; }
+function serPicks() {
+  return Array.from($('#serlist').querySelectorAll('input[type=checkbox]:checked')).map(c => c.value);
+}
+function serBtn() {
+  const n = serPicks().length;
+  $('#serpull').textContent = n ? T('Pull {n} selected', { n }) : T('Pull selected');
+  $('#serpull').disabled = !n;
+}
+function showSeries(ser) {
+  clearDup();
+  PENDING_SERIES = ser;
+  $('#err').textContent = '';
+  $('#sertitle').textContent = T('{name} is a series of {n} works. Pick what to pull.',
+    { name: ser.title || T('That page'), n: ser.works.length });
+  const list = $('#serlist'); list.textContent = '';
+  ser.works.forEach((w, i) => {
+    const row = document.createElement('label');
+    row.className = 'serrow' + (w.existing ? ' have' : '');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = w.url; cb.id = 'serw' + i;
+    cb.checked = !w.existing; if (w.existing) cb.disabled = true;
+    cb.onchange = serBtn;
+    const box = document.createElement('span');
+    const t = document.createElement('span'); t.className = 'sert';
+    t.textContent = w.title || w.url;
+    const m = document.createElement('span'); m.className = 'serm';
+    const bits = [];
+    if (w.words) bits.push(T('{n} words', { n: w.words.toLocaleString() }));
+    if (w.parts) bits.push(T('{n} parts', { n: w.parts }));
+    if (w.existing) bits.push(T('already on your shelf'));
+    m.textContent = bits.join(' · ');
+    box.append(t); box.append(m);
+    row.append(cb); row.append(box); list.append(row);
+  });
+  $('#serpick').hidden = false;
+  serBtn();
+  $('#serpick').scrollIntoView({ block: 'nearest' });
+  idle(T('That page is a series. Pick what to pull.'));
+}
+$('#serall').onclick = () => {
+  $('#serlist').querySelectorAll('input[type=checkbox]').forEach(c => { if (!c.disabled) c.checked = true; });
+  serBtn();
+};
+$('#sercancel').onclick = () => { clearSeries(); idle(''); };
+$('#serpull').onclick = async () => {
+  if (!PENDING_SERIES) return;
+  const picks = serPicks();
+  if (!picks.length) { idle(T('Pick at least one work to pull.')); return; }
+  const ser = PENDING_SERIES; clearSeries();
+  busy(T('Pulling {n} works from {name}…', { n: picks.length, name: ser.title || T('that page') }));
+  try {
+    const d = await jpost('/import/series', { user: USER, url: ser.page, picks });
+    await loadLibrary();
+    const ok = (d.imported || []).length, bad = (d.failed || []).length;
+    if (bad) fail(failure(T('Pulled {ok} of {total}. {bad} did not import.',
+      { ok, total: ok + bad, bad }), 207, d));
+    else idle(ok === 1 ? T('Pulled 1 work into "{name}".', { name: d.title })
+                       : T('Pulled {n} works into "{name}".', { n: ok, name: d.title }));
+  } catch (e) { fail(e); }
+};
 async function ingestFile(f) {
   needUser(); $('#err').textContent = '';
   try { const b64 = await fileB64(f);

@@ -47,8 +47,10 @@ _HREF = re.compile(r"""(?is)<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["']""")
 # cannot pass for a part number.
 _PART = re.compile(r"-(?P<n>\d{1,2})-(?P<m>\d{1,2})(?=$|[/?#])")
 # a tab title that means "the story lives here": Story, Story Posts, The Story,
-# Story Chapters. Casting / Author Notes / Playlist are tabs too and must not win.
-_STORY_TAB = re.compile(r"(?i)\b(story|stories|chapter|chapters|part|parts)\b")
+# Story Chapters, a series of Episodes or Books. Casting / Author Notes /
+# Playlist are tabs too and must not win.
+_STORY_TAB = re.compile(r"(?i)\b(story|stories|chapter|chapters|part|parts|"
+                        r"episode|episodes|book|books)\b")
 _TAB = re.compile(r"""(?is)<h2\b[^>]*class="[^"]*\btabtitle\b[^"]*"[^>]*>(.*?)</h2>""")
 # a dated post URL on this site: /2024/03/a-glimpse-of-us-1-2/
 _POST_PATH = re.compile(r"^/20\d\d/\d\d/[^/]+/?$")
@@ -182,18 +184,19 @@ def links_in(html: str, base_url: str) -> list:
     return out
 
 
-def story_tab_links(page: str, url: str) -> list:
-    """Links out of the tab that holds the story, if the tab markup is there."""
+def story_tab_html(page: str) -> str:
+    """The markup of the tab that holds the story, if the tab markup is there."""
     tabs = list(_TAB.finditer(page))
-    if not tabs:
-        return []
-    chosen = ""
     for i, m in enumerate(tabs):
         end = tabs[i + 1].start() if i + 1 < len(tabs) else len(page)
-        title = clean_fragment(m.group(1))
-        if _STORY_TAB.search(title):
-            chosen = page[m.end():end]
-            break
+        if _STORY_TAB.search(clean_fragment(m.group(1))):
+            return page[m.end():end]
+    return ""
+
+
+def story_tab_links(page: str, url: str) -> list:
+    """Links out of the tab that holds the story, if the tab markup is there."""
+    chosen = story_tab_html(page)
     return links_in(chosen, url) if chosen else []
 
 
@@ -214,23 +217,77 @@ def part_links(page: str, url: str) -> dict:
     return found
 
 
-def series_works(page: str, url: str) -> list:
-    """The works a series landing page lists, in page order.
+# A work listed on a series page: the title anchor, then "(82,200)" or
+# "(9,220 words)" a few characters later.
+_ANCHOR = re.compile(r'(?is)<a\b[^>]*?\bhref\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>')
+_WORDS = re.compile(r"(?is)\((?:approx\.?\s*)?([\d,]{3,})\s*(?:words?)?\)")
+_LEADING_NUM = re.compile(r"^\s*(\d{1,2})\s*[.)]\s*")
+_SERIES_SUFFIX = re.compile(r"\s*\((?:series|episodes|books?)\)\s*$", re.IGNORECASE)
+MAX_SERIES_WORKS = 40              # a series, not a sitemap
 
-    A ~Series~ page is not one story: its Stories tab links out to N unrelated
-    posts, each a whole work of its own. They are told apart from bundle pages
-    because their slugs carry no -N-M part marker and their family is not this
-    page's family."""
+
+def _words_in(tail: str):
+    m = _WORDS.search(tail or "")
+    if not m:
+        return None
+    try:
+        return int(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def series_items(page: str, url: str) -> list:
+    """The works a series landing page lists, in reading order.
+
+    A ~Series~ page is not one story: its Stories tab (or Episodes, or Books)
+    links out to N unrelated posts, each a whole work of its own. What separates
+    a work of this series from a bundle page of one work is the URL family: a
+    bundle page carries the same family as its work's landing page, so a link
+    whose family is this page's family is this page's own material and nothing
+    to offer. A listed work may itself be published in -N-M parts ("Only Time
+    - 1/4"); that is a work with four parts, not four works.
+
+    Each item carries what the page already says about it, so a picker can show
+    how much is there without opening a single work: title, word count (the
+    site prints it after the link), and part count from the slug.
+    """
+    seg = story_tab_html(page)
+    if not seg:
+        return []
     here = family_of(url)
-    out = []
-    for link in story_tab_links(page, url):
-        if not is_post_url(link):
+    base_host = _host(url)
+    out, seen = [], set()
+    for m in _ANCHOR.finditer(seg):
+        link = urllib.parse.urljoin(url, m.group(1).strip())
+        u = urllib.parse.urlparse(link)
+        if u.scheme not in ("http", "https") or _host(link) != base_host:
             continue
-        fam, n, _of = split_part(last_segment(link))
-        if n is not None or fam == here:
+        clean = urllib.parse.urlunparse(u._replace(query="", fragment=""))
+        if not is_post_url(clean) or clean in seen:
             continue
-        out.append(link)
+        fam, n, of = split_part(last_segment(clean))
+        if fam == here:
+            continue
+        seen.add(clean)
+        title = clean_fragment(m.group(2))
+        title = _LEADING_NUM.sub("", title)[:160].strip()
+        out.append({"url": clean,
+                    "title": title,
+                    "words": _words_in(seg[m.end():m.end() + 120]),
+                    "parts": of if n is not None else None})
+        if len(out) >= MAX_SERIES_WORKS:
+            break
     return out
+
+
+def series_works(page: str, url: str) -> list:
+    """Just the URLs of series_items, for callers that only need those."""
+    return [i["url"] for i in series_items(page, url)]
+
+
+def series_title(page: str) -> str:
+    """The series name, with the site's "(Series)" tail cut off."""
+    return _SERIES_SUFFIX.sub("", post_title(page)).strip()
 
 
 def ordered_parts(found: dict, url: str) -> list:
@@ -341,15 +398,18 @@ class Keiramarcos:
         start_url, start_page = first
         pages[start_url] = start_page
 
-        works = series_works(start_page, start_url)
+        works = series_items(start_page, start_url)
         if len(works) >= 2:
-            # one import, one book. A series page is several books, and the
-            # honest answer is to name them rather than fold them into one.
+            # One import, one book. A series page is several books, and the
+            # honest answer is to list them and let the reader pick, not to
+            # fold them into one nor to make them paste links one at a time.
             raise Refused(
                 "that is a series page",
-                "this page lists %d works of its own. Open one of them and paste "
-                "that link, or paste a work's page: %s"
-                % (len(works), works[0]), status=422)
+                "this page lists %d works of its own. Pick the ones you want: %s"
+                % (len(works), works[0]["url"]), status=422,
+                series={"title": series_title(start_page) or "Series",
+                        "page": start_url, "works": works})
+
         found = part_links(start_page, start_url)
         ordered = ordered_parts(found, start_url) if found else [start_url]
         if is_post_url(url) and url not in ordered:
@@ -368,6 +428,19 @@ class Keiramarcos:
         book["meta"]["parts"] = len(fetched)
         book["meta"]["identity"] = identity_of(start_url)
         return to_book(book)
+
+    def series(self, req, fetch, cred=None):
+        """What this page holds, if it is a series page: {title, page, works}.
+
+        The host calls this again before importing a selection, so a picker can
+        never make it fetch a URL that was not linked from the page it named.
+        """
+        url = req["url"]
+        page = fetch(url, cred=cred, credential_hosts=self.credential_hosts())
+        works = series_items(page, url)
+        if len(works) < 2:
+            return None
+        return {"title": series_title(page) or "Series", "page": url, "works": works}
 
     def _assemble(self, fetched: list, work_url: str) -> dict:
         chapters, meta, title = [], {}, ""

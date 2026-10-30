@@ -181,6 +181,83 @@ class TestParse(unittest.TestCase):
         self.assertEqual(ctx.exception.status, 422)
         self.assertIn("a-caged-tiger", ctx.exception.detail)
 
+    def test_a_series_page_lists_what_is_there_with_titles_and_sizes(self):
+        """The page already says how much is there: title, word count, parts.
+
+        The live shape, from Heart & Soul: a Story/Stories tab whose entries are
+        `<h2><a href="...">Title</a> (82,200)</h2>`, a work published in four
+        parts listed as one work, and a work whose slug carries -N-M still being
+        a work of the series rather than a bundle page of it.
+        """
+        series = """<html><body><h1 class="entry-title">Heart &#038; Soul (Series)</h1>
+<div class="entry-content"><div class="responsive-tabs">
+<h2 class="tabtitle">Stories</h2><div class="tabcontent">
+<h2><a href="https://keiramarcos.com/2021/06/hearts-desire-1-3/">Heart&#8217;s Desire</a> (82,200)</h2>
+<p>Years after the war.</p>
+<h2><a href="https://keiramarcos.com/2021/09/soul-magic-2/">Soul Magic</a> (25,127)</h2>
+<p>Loch Ness.</p>
+<h2><a href="https://keiramarcos.com/2022/10/only-time-1-4/">Only Time</a> (122,430)</h2>
+<p>Cast into the past.</p>
+</div><h2 class="tabtitle">Casting</h2><div class="tabcontent">
+<a href="https://keiramarcos.com/2021/06/hearts-desire-1-3/">Harry</a>
+</div></div></div></body></html>"""
+        url = "https://keiramarcos.com/fan-fiction/heart-soul-series/"
+        items = km.series_items(series, url)
+        self.assertEqual([i["title"] for i in items],
+                         ["Heart\u2019s Desire", "Soul Magic", "Only Time"])
+        self.assertEqual([i["words"] for i in items], [82200, 25127, 122430])
+        self.assertEqual([i["parts"] for i in items], [3, None, 4])
+        self.assertEqual([i["url"] for i in items],
+                         ["https://keiramarcos.com/2021/06/hearts-desire-1-3/",
+                          "https://keiramarcos.com/2021/09/soul-magic-2/",
+                          "https://keiramarcos.com/2022/10/only-time-1-4/"])
+        self.assertEqual(km.series_title(series), "Heart & Soul")
+
+    def test_an_episodes_tab_is_a_series_too(self):
+        series = """<html><body><h1 class="entry-title">The Vanguard (Series)</h1>
+<div class="entry-content"><div class="responsive-tabs">
+<h2 class="tabtitle">Episodes</h2><div class="tabcontent">
+<p>1. <a href="https://keiramarcos.com/2021/10/burning-bridges/">Burning Bridges</a> (9,220 words)</p>
+<p>2. <a href="https://keiramarcos.com/2021/10/unexpected-reinforcements/">Unexpected Reinforcements</a> (10,739 words)</p>
+</div><h2 class="tabtitle">Casting</h2><div class="tabcontent"></div>
+</div></div></body></html>"""
+        url = "https://keiramarcos.com/fan-fiction/the-vanguard-series/"
+        items = km.series_items(series, url)
+        self.assertEqual([i["title"] for i in items],
+                         ["Burning Bridges", "Unexpected Reinforcements"])
+        self.assertEqual([i["words"] for i in items], [9220, 10739])
+
+    def test_a_work_page_lists_no_works_of_its_own(self):
+        """One work's Stories tab links its own parts: same family, not a series."""
+        self.assertEqual(km.series_items(LANDING, WORK), [])
+
+    def test_the_series_refusal_carries_the_list_to_pick_from(self):
+        from host.contracts import Refused
+        series = """<html><body><h1 class="entry-title">Hold My Coffee (Series)</h1>
+<div class="entry-content"><div class="responsive-tabs">
+<h2 class="tabtitle">Stories</h2><div class="tabcontent">
+<h2><a href="https://keiramarcos.com/2017/02/a-caged-tiger/">A Caged Tiger</a> (41,000)</h2>
+<h2><a href="https://keiramarcos.com/2017/02/an-empty-coffin/">An Empty Coffin</a> (32,000)</h2>
+</div></div></div></body></html>"""
+        url = "https://keiramarcos.com/fan-fiction/stargate-atlantis-fan-fiction/holdmycoffee/"
+        k = km.Keiramarcos()
+        with self.assertRaises(Refused) as ctx:
+            k.read({"kind": "url", "url": url}, FakeFetch({url: series}))
+        ser = ctx.exception.extra["series"]
+        self.assertEqual(ser["title"], "Hold My Coffee")
+        self.assertEqual(ser["page"], url)
+        self.assertEqual([w["title"] for w in ser["works"]],
+                         ["A Caged Tiger", "An Empty Coffin"])
+        # and the same list is available without triggering the refusal
+        self.assertEqual(k.series({"kind": "url", "url": url},
+                                  FakeFetch({url: series})),
+                         {"title": "Hold My Coffee", "page": url,
+                          "works": km.series_items(series, url)})
+
+    def test_series_is_none_for_a_work_page(self):
+        self.assertIsNone(km.Keiramarcos().series(
+            {"kind": "url", "url": WORK}, FakeFetch(dict(PAGES))))
+
     def test_a_stored_copy_from_a_bundle_link_is_the_same_work(self):
         k = km.Keiramarcos()
         self.assertTrue(k.same({"url": P1}, {"url": WORK}))
