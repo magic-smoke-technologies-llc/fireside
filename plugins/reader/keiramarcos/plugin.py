@@ -54,6 +54,14 @@ _STORY_TAB = re.compile(r"(?i)\b(story|stories|chapter|chapters|part|parts|"
 _TAB = re.compile(r"""(?is)<h2\b[^>]*class="[^"]*\btabtitle\b[^"]*"[^>]*>(.*?)</h2>""")
 # a dated post URL on this site: /2024/03/a-glimpse-of-us-1-2/
 _POST_PATH = re.compile(r"^/20\d\d/\d\d/[^/]+/?$")
+# Older series pages link their works by WordPress shortlink: /?p=2937. The
+# address is the query, so stripping it (as every other link here is stripped
+# of its query) turns the work into the home page. Ring of Fire lists its one
+# work that way and read as empty for exactly this reason.
+_SHORTLINK = re.compile(r"(?:^|&)p=(?P<id>\d+)(?:&|$)")
+_LINK_TAG = re.compile(r"(?is)<link\b[^>]*>")
+_CANON_REL = re.compile(r"(?is)\brel\s*=\s*[\"']canonical[\"']")
+_HREF_ATTR = re.compile(r"(?is)\bhref\s*=\s*[\"']([^\"']+)[\"']")
 _H1 = re.compile(r"(?is)<h1\b[^>]*>(.*?)</h1>")
 # "Chapters 6-10" / "Part 2 of 3" as a heading: navigation, not a chapter. A
 # bare "Chapter 1" is a chapter, so only a span counts as navigation.
@@ -99,6 +107,37 @@ def last_segment(url: str) -> str:
 
 def is_post_url(url: str) -> bool:
     return bool(_POST_PATH.match(urllib.parse.urlparse(url).path or ""))
+
+
+def is_shortlink(url: str) -> bool:
+    """A post addressed as /?p=2937 instead of by its dated permalink."""
+    u = urllib.parse.urlparse(url or "")
+    return not (u.path or "").strip("/") and bool(_SHORTLINK.search(u.query or ""))
+
+
+def is_work_link(url: str) -> bool:
+    """A link to one work: a dated permalink, or a shortlink to the same post."""
+    return is_post_url(url) or is_shortlink(url)
+
+
+def canonical_of(page: str) -> str:
+    """The address a page declares for itself, if it declares one.
+
+    A shortlink serves the post but names it wrong, and identity is built from
+    the address, so two ways into one story would otherwise be two books.
+    """
+    for tag in _LINK_TAG.finditer(page or ""):
+        t = tag.group(0)
+        if not _CANON_REL.search(t):
+            continue
+        m = _HREF_ATTR.search(t)
+        if m:
+            href = m.group(1).strip()
+            # only an absolute address is usable as identity; a relative one
+            # would have to be joined against a page we do not have here
+            if href.startswith(("http://", "https://")):
+                return href
+    return ""
 
 
 def split_part(slug: str):
@@ -259,6 +298,18 @@ def _clean_url(url: str, base: str) -> str:
     return urllib.parse.urlunparse(u._replace(query="", fragment=""))
 
 
+def _clean_link(url: str, base: str) -> str:
+    """_clean_url, except a shortlink keeps its id: there the query is the
+    address, and a shortlink stripped of its query is the home page."""
+    link = urllib.parse.urljoin(base, (url or "").strip())
+    u = urllib.parse.urlparse(link)
+    if u.scheme not in ("http", "https") or _host(link) != _host(base):
+        return ""
+    if is_shortlink(link):
+        return urllib.parse.urlunparse(u._replace(fragment=""))
+    return _clean_url(url, base)
+
+
 def _words_anywhere(text: str):
     m = _WORDS_ANY.search(text or "")
     if m:
@@ -279,8 +330,8 @@ def _items_from_headings(page: str, url: str):
         inner = m.group(2)
         links = []
         for a in _ANCHOR.finditer(inner):
-            clean = _clean_url(a.group(1), url)
-            if clean and is_post_url(clean):
+            clean = _clean_link(a.group(1), url)
+            if clean and is_work_link(clean):
                 links.append((clean, _PART_LABEL.match(clean_fragment(a.group(2)) or "")))
         if not links:
             continue
@@ -333,15 +384,16 @@ def series_items(page: str, url: str) -> list:
     items = _items_from_headings(page, url)
     if items:
         return items
-    # no headings to group by: fall back to the anchors themselves
-    seg = story_tab_html(page)
+    # no headings to group by: fall back to the anchors themselves. A page with
+    # no tabs at all keeps its list in the body, and that is still a list.
+    seg = story_tab_html(page) or content_region(page)
     if not seg:
         return []
     here, base = family_of(url), _host(url)
     out, seen = [], set()
     for m in _ANCHOR.finditer(seg):
-        clean = _clean_url(m.group(1), url)
-        if not clean or not is_post_url(clean) or clean in seen:
+        clean = _clean_link(m.group(1), url)
+        if not clean or not is_work_link(clean) or clean in seen:
             continue
         fam, n, of = split_part(last_segment(clean))
         if fam == here:
@@ -364,6 +416,16 @@ def series_works(page: str, url: str) -> list:
 def series_title(page: str) -> str:
     """The series name, with the site's "(Series)" tail cut off."""
     return _SERIES_SUFFIX.sub("", post_title(page)).strip()
+
+
+def series_marked(page: str) -> bool:
+    """Does the page say out loud that it is a series?
+
+    Needed where a list has one entry: a work page that mentions a sister story
+    is not a series of one, and following that link would import the wrong book.
+    """
+    raw = post_title(page)
+    return bool(raw) and _SERIES_SUFFIX.sub("", raw).strip() != raw.strip()
 
 
 def ordered_parts(found: dict, url: str) -> list:
@@ -472,9 +534,18 @@ class Keiramarcos:
         if first is None:
             first = (url, fetch(url, cred=cred, credential_hosts=self.credential_hosts()))
         start_url, start_page = first
+        if is_shortlink(start_url):
+            # the page knows its own address; use it so identity is the work,
+            # not the way in
+            canon = canonical_of(start_page)
+            if canon and is_post_url(canon):
+                start_url = canon
         pages[start_url] = start_page
 
         works = series_items(start_page, start_url)
+        if len(works) == 1 and works[0]["url"] != start_url and series_marked(start_page):
+            # a series page holding one work is one work, not a shelf
+            return self.read({"kind": "url", "url": works[0]["url"]}, fetch, cred)
         if len(works) >= 2:
             # One import, one book. A series page is several books, and the
             # honest answer is to list them and let the reader pick, not to
@@ -488,8 +559,8 @@ class Keiramarcos:
 
         found = part_links(start_page, start_url)
         ordered = ordered_parts(found, start_url) if found else [start_url]
-        if is_post_url(url) and url not in ordered:
-            ordered = [url] + ordered
+        if is_post_url(start_url) and start_url not in ordered:
+            ordered = [start_url] + ordered
 
         fetched = []
         for part_url in ordered[:MAX_PARTS]:
