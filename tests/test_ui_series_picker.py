@@ -46,3 +46,45 @@ class TestSeriesPickerMarkup(unittest.TestCase):
         # hidden: a work you own is still part of what the page holds.
         self.assertIn("cb.disabled = true", PAGE)
         self.assertIn("already on your shelf", PAGE)
+
+class TestThePickerIsReadableAndMoves(unittest.TestCase):
+    """Cat's report: four checkboxes and no visible text, then a pull with no
+    sign it was happening. Both are things you can only see on the screen, so
+    these read the served page for the properties that made them invisible."""
+
+    def test_the_row_text_uses_a_token_that_exists(self):
+        # the title was styled with var(--fg), which no theme defines: the
+        # declaration is invalid, the colour falls back, and the row reads as
+        # 12px uppercase in the dimmest grey - i.e. as nothing on a phone.
+        self.assertNotIn("var(--fg)", PAGE)
+        m = re.search(r"\.serrow \.sert\{([^}]*)\}", PAGE)
+        self.assertTrue(m)
+        self.assertIn("var(--text)", m.group(1))
+        self.assertIn("font-size:15px", m.group(1))
+
+    def test_the_row_is_not_uppercase_and_not_12px(self):
+        m = re.search(r"\.serrow\{([^}]*)\}", PAGE)
+        self.assertTrue(m, "the row lost its own rule")
+        self.assertIn("text-transform:none", m.group(1))
+        self.assertIn("font-size:14px", m.group(1))
+
+    def test_every_row_gets_a_title_even_when_the_page_gives_none(self):
+        self.assertIn("T('Untitled work')", PAGE)
+
+    def test_there_is_a_live_status_line_while_the_pull_runs(self):
+        m = re.search(r'<p class="small" id="serstatus"[^>]*>', PAGE)
+        self.assertTrue(m)
+        self.assertIn('role="status"', m.group(0))
+        self.assertIn('aria-live="polite"', m.group(0))
+        self.assertIn("Pulling {i} of {n}: {title}", PAGE)
+
+    def test_the_pull_asks_for_one_work_at_a_time_so_it_can_report_progress(self):
+        self.assertIn("picks: [picks[i]]", PAGE)
+
+    def test_the_settings_sheet_can_be_closed_from_the_top(self):
+        self.assertIn('id="settingsx"', PAGE)
+        self.assertIn("$('#settingsx').onclick", PAGE)
+
+    def test_the_cancel_button_is_translated(self):
+        m = re.search(r'<button class="btn quiet" id="sercancel"[^>]*>', PAGE)
+        self.assertIn('data-t="Cancel"', m.group(0))

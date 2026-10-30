@@ -195,8 +195,6 @@
   "Pull {n} selected": "Pull {n} selected",
   "Pulled 1 work into \"{name}\".": "Pulled 1 work into \"{name}\".",
   "Pulled {n} works into \"{name}\".": "Pulled {n} works into \"{name}\".",
-  "Pulled {ok} of {total}. {bad} did not import.": "Pulled {ok} of {total}. {bad} did not import.",
-  "Pulling {n} works from {name}…": "Pulling {n} works from {name}…",
   "Purchase": "Purchase",
   "Purchase complete.": "Purchase complete.",
   "Queue": "Queue",
@@ -379,6 +377,11 @@
   "＋ Create series…": "＋ Create series…",
   "＋ Queue": "＋ Queue",
   "Please confirm": "Please confirm",
-  "Yes, do it": "Yes, do it"
+  "Yes, do it": "Yes, do it",
+  "Untitled work": "Untitled work",
+  "this work": "this work",
+  "Pulling {i} of {n}: {title}": "Pulling {i} of {n}: {title}",
+  "Pulled {ok} of {total}. Did not import: {names}": "Pulled {ok} of {total}. Did not import: {names}",
+  "Pulled {ok} of {total} from {name}.": "Pulled {ok} of {total} from {name}."
  }
 }

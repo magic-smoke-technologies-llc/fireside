@@ -222,7 +222,10 @@ def part_links(page: str, url: str) -> dict:
 _ANCHOR = re.compile(r'(?is)<a\b[^>]*?\bhref\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>')
 _WORDS = re.compile(r"(?is)\((?:approx\.?\s*)?([\d,]{3,})\s*(?:words?)?\)")
 _LEADING_NUM = re.compile(r"^\s*(\d{1,2})\s*[.)]\s*")
-_SERIES_SUFFIX = re.compile(r"\s*\((?:series|episodes|books?)\)\s*$", re.IGNORECASE)
+# the site marks a series page in the title, and not always in the same way:
+# "Heart & Soul ~Series~", "The Genesis of a Jedi ~ Series ~", "Requiem (Series)"
+_SERIES_SUFFIX = re.compile(
+    r"[\s~()\[\]]*(?:series|episodes|books?)[\s~()\[\]]*$", re.IGNORECASE)
 MAX_SERIES_WORKS = 40              # a series, not a sitemap
 
 
@@ -236,43 +239,116 @@ def _words_in(tail: str):
         return None
 
 
-def series_items(page: str, url: str) -> list:
-    """The works a series landing page lists, in reading order.
+# Two shapes of listing on one site:
+#   <h2><a href="/2021/06/hearts-desire-1-3/">Heart’s Desire</a> (82,200)</h2>
+#   <h4>A Guardian’s Path ~ 80,835 Words ~ <a>Post 1</a> | <a>Post 2</a></h4>
+# In the first the title is the link. In the second the title is the heading's
+# own text and the links are just parts of that one work, labelled "Post 1",
+# "Post 2". Reading the anchors alone turns the second into four books called
+# "Post 1", which is not a shelf anyone wants.
+_HEADING = re.compile(r"(?is)<h([1-6])\b[^>]*>(.*?)</h\1>")
+_PART_LABEL = re.compile(r"(?i)^\s*(?:post|part|chapter|ch\.?|episode)\s*\d*\s*$")
+_WORDS_ANY = re.compile(r"(?is)([\d,]{3,})\s*words?\b")
 
-    A ~Series~ page is not one story: its Stories tab (or Episodes, or Books)
-    links out to N unrelated posts, each a whole work of its own. What separates
-    a work of this series from a bundle page of one work is the URL family: a
-    bundle page carries the same family as its work's landing page, so a link
-    whose family is this page's family is this page's own material and nothing
-    to offer. A listed work may itself be published in -N-M parts ("Only Time
-    - 1/4"); that is a work with four parts, not four works.
 
-    Each item carries what the page already says about it, so a picker can show
-    how much is there without opening a single work: title, word count (the
-    site prints it after the link), and part count from the slug.
-    """
+def _clean_url(url: str, base: str) -> str:
+    link = urllib.parse.urljoin(base, url.strip())
+    u = urllib.parse.urlparse(link)
+    if u.scheme not in ("http", "https") or _host(link) != _host(base):
+        return ""
+    return urllib.parse.urlunparse(u._replace(query="", fragment=""))
+
+
+def _words_anywhere(text: str):
+    m = _WORDS_ANY.search(text or "")
+    if m:
+        try:
+            return int(m.group(1).replace(",", ""))
+        except ValueError:
+            return None
+    return _words_in(text)
+
+
+def _items_from_headings(page: str, url: str):
     seg = story_tab_html(page)
     if not seg:
         return []
-    here = family_of(url)
-    base_host = _host(url)
+    here, base = family_of(url), _host(url)
+    out, seen = [], set()
+    for m in _HEADING.finditer(seg):
+        inner = m.group(2)
+        links = []
+        for a in _ANCHOR.finditer(inner):
+            clean = _clean_url(a.group(1), url)
+            if clean and is_post_url(clean):
+                links.append((clean, _PART_LABEL.match(clean_fragment(a.group(2)) or "")))
+        if not links:
+            continue
+        first_url, first_is_label = links[0]
+        fam, n, of = split_part(last_segment(first_url))
+        if fam == here:
+            continue
+        if first_is_label:
+            # the heading's own words are the title: "Title ~ 80,835 Words ~"
+            text = clean_fragment(_ANCHOR.sub(" ", inner))
+            text = _WORDS_ANY.sub(" ", text)
+            if "~" in text:
+                text = text.split("~")[0]
+            title = " ".join(text.split()).strip(" -|〜")
+            parts = of if n is not None else (len(links) if len(links) > 1 else None)
+        else:
+            # the title is the link that is not a part label
+            title, parts = "", (of if n is not None else None)
+            for a in _ANCHOR.finditer(inner):
+                cand = clean_fragment(a.group(2))
+                if cand and not _PART_LABEL.match(cand):
+                    title = cand
+                    break
+        title = _LEADING_NUM.sub("", title or "")[:160].strip()
+        if first_url in seen:
+            continue
+        seen.add(first_url)
+        out.append({"url": first_url, "title": title,
+                    "words": _words_anywhere(inner), "parts": parts})
+        if len(out) >= MAX_SERIES_WORKS:
+            break
+    return out
+
+
+def series_items(page: str, url: str) -> list:
+    """The works a ~Series~ page lists, in reading order.
+
+    A ~Series~ page is not one story: its Stories tab (or Episodes, or Books)
+    holds N unrelated works. What separates a work of this series from a bundle
+    page of one work is the URL family: a bundle page carries the same family as
+    its work's landing page, so a link whose family is this page's family is
+    this page's own material and nothing to offer. A work published in -N-M
+    parts ("Only Time - 1/4", or "Post 1 | Post 2") is one work with four parts,
+    not four works.
+
+    Each item carries what the page already says about it, so a picker can show
+    how much is there without opening a single work: title, word count, and the
+    part count.
+    """
+    items = _items_from_headings(page, url)
+    if items:
+        return items
+    # no headings to group by: fall back to the anchors themselves
+    seg = story_tab_html(page)
+    if not seg:
+        return []
+    here, base = family_of(url), _host(url)
     out, seen = [], set()
     for m in _ANCHOR.finditer(seg):
-        link = urllib.parse.urljoin(url, m.group(1).strip())
-        u = urllib.parse.urlparse(link)
-        if u.scheme not in ("http", "https") or _host(link) != base_host:
-            continue
-        clean = urllib.parse.urlunparse(u._replace(query="", fragment=""))
-        if not is_post_url(clean) or clean in seen:
+        clean = _clean_url(m.group(1), url)
+        if not clean or not is_post_url(clean) or clean in seen:
             continue
         fam, n, of = split_part(last_segment(clean))
         if fam == here:
             continue
         seen.add(clean)
-        title = clean_fragment(m.group(2))
-        title = _LEADING_NUM.sub("", title)[:160].strip()
         out.append({"url": clean,
-                    "title": title,
+                    "title": _LEADING_NUM.sub("", clean_fragment(m.group(2)))[:160].strip(),
                     "words": _words_in(seg[m.end():m.end() + 120]),
                     "parts": of if n is not None else None})
         if len(out) >= MAX_SERIES_WORKS:
