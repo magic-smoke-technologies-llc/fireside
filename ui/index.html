@@ -1168,15 +1168,77 @@ const dur = s => { s = Math.max(0, Math.round(s||0));
   if (h) return h + 'h ' + m + 'm'; if (m) return m + 'm'; return s + 's'; };
 function needUser() { if (!USER) { fail(T('set your name first (top right)')); throw new Error('no user'); } }
 
+// --- places in history ------------------------------------------------------
+// Every view is a place, so Back returns where the reader came from instead of
+// out of the app, which is what happened to Cat mid-book: one entry for the
+// whole page, so one Back press left fireside entirely. The state rides in the
+// hash and not in the path because the server already owns every real path
+// (`/library` answers with the library JSON, `/plans` with the price list), and
+// a hash never asks the server for anything.
+const ROUTE_OF = { lib: 'library', play: 'play', sand: 'voice', plans: 'plans', set: 'settings' };
+const VIEW_OF = { library: 'lib', play: 'play', voice: 'sand', plans: 'plans', settings: 'set' };
+let ROUTE_LAST = '';          // the hash this page believes it is showing
+let APPLYING_ROUTE = false;   // a Back press is deciding the view; do not push
+let BOOTING = true;           // the first entry is written by boot, not by show()
+function currentView() {
+  const on = document.querySelector('.view.on');
+  return on ? on.id.replace(/^v-/, '') : 'lib';
+}
+function currentSetTab() {
+  const b = document.querySelector('#settabs button.on');
+  return b ? b.dataset.p : 'voice';
+}
+function routeHash() {
+  const v = currentView();
+  if (v === 'play' && book) return '#/play/' + encodeURIComponent(book.id);
+  if (v === 'set') return '#/settings/' + currentSetTab();
+  return '#/' + (ROUTE_OF[v] || 'library');
+}
+// Write the place we are in. 'replace' corrects the current entry (a settings
+// tab settled, a book finished opening); the default adds one, so Back undoes it.
+function syncRoute(mode) {
+  if (APPLYING_ROUTE || BOOTING) return;
+  const h = routeHash();
+  if (h === ROUTE_LAST) return;
+  try {
+    if (mode === 'replace') history.replaceState({ route: h }, '', h);
+    else history.pushState({ route: h }, '', h);
+    ROUTE_LAST = h;
+  } catch (_) {}   // a browser that refuses history still reads the page fine
+}
+async function applyRoute() {
+  APPLYING_ROUTE = true;
+  try {
+    const parts = decodeURIComponent((location.hash || '').replace(/^#\/?/, '')).split('/').filter(Boolean);
+    const v = VIEW_OF[parts[0]] || 'lib';
+    if (v === 'play' && parts[1]) {
+      const id = parts.slice(1).join('/');
+      if (!book || book.id !== id) await openBook(id, true); else show('play');
+    } else {
+      show(v);
+      if (v === 'set' && parts[1]) setSetTab(parts[1], 'replace');
+    }
+  } finally {
+    ROUTE_LAST = routeHash();
+    APPLYING_ROUTE = false;
+  }
+}
+window.addEventListener('popstate', () => { applyRoute(); });
+window.addEventListener('hashchange', () => { if (location.hash !== ROUTE_LAST) applyRoute(); });
+
 // --- views -----------------------------------------------------------------
-function show(v) {
+function show(v, mode) {
   document.querySelectorAll('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
   /* A bare list of buttons does not tell a screen reader which one is current,
      so the active tab carries aria-current as well as the `.on` class. */
   document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.v === v;
     b.classList.toggle('on', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  /* The place changes with the view, before the view loads anything: Back has
+     to work while a book is still opening, and a failed load still leaves the
+     reader somewhere they can leave. */
+  syncRoute(mode === 'replace' ? 'replace' : undefined);
   if (v === 'set') { loadPron(); loadLinked(); loadSessions(); loadPlan(); loadPasswordPanel();
-    loadDanger(); setSetTab(localStorage.getItem(SETTAB_KEY)); }
+    loadDanger(); setSetTab(localStorage.getItem(SETTAB_KEY), 'replace'); }
   if (v === 'plans') loadPlansPage();
   if (v === 'lib') renderActiveJobs();
 }
@@ -1186,7 +1248,7 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => show(b.
 // The settings page holds unrelated jobs (voices, words, plan, account, admin),
 // so it gets its own tab bar, separate from the app nav (#tabs). The admin tab
 // only exists for an admin account.
-function setSetTab(p) {
+function setSetTab(p, mode) {
   const bar = $('#settabs'); if (!bar) return;
   let btn = p ? bar.querySelector(`button[data-p="${p}"]`) : null;
   if (!btn || btn.hidden) { p = 'voice'; btn = bar.querySelector('button[data-p="voice"]'); }
@@ -1196,6 +1258,7 @@ function setSetTab(p) {
   try { localStorage.setItem(SETTAB_KEY, p); } catch (_) {}
   if (p === 'plan') loadCredits();
   if (p === 'account') loadTwofa();
+  syncRoute(mode === 'replace' ? 'replace' : undefined);
 }
 if ($('#settabs')) document.querySelectorAll('#settabs button').forEach(b => b.onclick = () => setSetTab(b.dataset.p));
 /* Language: the list comes from the server (one JSON catalog per language in
@@ -1731,7 +1794,7 @@ async function loadSessions() {
     const all = data.all || [];
     wrap.style.display = data.admin ? '' : 'none';
     const atab = $('#settabadmin');
-    if (atab) { atab.hidden = !data.admin; setSetTab(localStorage.getItem(SETTAB_KEY)); }
+    if (atab) { atab.hidden = !data.admin; setSetTab(localStorage.getItem(SETTAB_KEY), 'replace'); }
     if (data.admin) loadGrants();
     if (data.admin) { loadAdminPlans(); loadRegSetting(); }
     if (data.admin) all.forEach(s => {
@@ -1880,7 +1943,7 @@ async function refreshBalance() {
   try { drawChip(await api('/credits')); }
   catch (_) { drawChip(null); }
 }
-if ($('#balchip')) $('#balchip').onclick = () => { show('set'); setSetTab('plan'); };
+if ($('#balchip')) $('#balchip').onclick = () => { show('set'); setSetTab('plan', 'replace'); };
 // Another tab may be rendering, which spends characters. Coming back to this
 // one is the moment worth re-asking, and no more often than once a minute.
 window.addEventListener('focus', () => {
@@ -2726,7 +2789,7 @@ async function claimSubmit() {
     await api('/auth/claim/confirm', { method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ claim: AUTH.claim, password: p }) });
-    history.replaceState({}, '', location.pathname);   // drop ?claim= on reload
+    history.replaceState({}, '', location.pathname + location.hash);   // drop ?claim= on reload
     location.reload();
   } catch (e) {
     authMsg(e.message || 'that password did not match the existing account');
@@ -3045,7 +3108,7 @@ function renderWelcome() {
         p.hidden = false; $('#drop').scrollIntoView({ behavior: 'smooth', block: 'center' }); } },
     { done: haveVoice, label: 'Connect a voice',
       hint: 'Fireside reads with a voice server you control, yours or a shared one. Without a voice it has nothing to read with.',
-      go: 'Open voice settings', run: () => { show('set'); setSetTab('voice'); } },
+      go: 'Open voice settings', run: () => { show('set'); setSetTab('voice', 'replace'); } },
     { done: voiced, label: 'Voice your first chapter',
       hint: 'Converting spends reading characters from your plan.',
       go: 'Open your book', run: () => { const b = (books || [])[0]; if (b) { openBook(b.id); show('play'); } } },
@@ -3203,6 +3266,7 @@ async function openBook(id, jumpPlay) {
     cur = -1;
     renderPlay();
     if (jumpPlay) show('play');
+    syncRoute('replace');   // the URL now names the book that actually opened
     idle('Opened ' + book.title + '.');
   } catch (e) { fail(e); }
 }
@@ -4616,25 +4680,43 @@ window.addEventListener('load', async () => {
     if (lp && lp.book_id) { RESUME = lp; lastName = lp.book_id;
       try { localStorage.setItem(LKEY, lastName); } catch (e) {}
       renderResume(); } } catch (_) {}
-  if (lastName) { try { await openBook(lastName); } catch (_) {} }
+  /* A link that names a book opens that one; the local resume would open a
+     different book and then be replaced a beat later. */
+  let deepBook = '';
+  try { const d = (location.hash || '').replace(/^#\/?/, '').split('/');
+    if (d[0] === 'play' && d[1]) deepBook = decodeURIComponent(d[1]); } catch (_) {}
+  if (lastName && lastName !== deepBook) { try { await openBook(lastName); } catch (_) {} }
   renderQueue();
   applyVolume();
   syncTog();
   applyReadingUI();
+  /* First entry: the app owns one place even before anything is tapped, so the
+     first Back press stays inside fireside instead of leaving the site. A link
+     that already names a place keeps its own. */
+  try {
+    if (/^#\//.test(location.hash || '')) {
+      history.replaceState({ route: location.hash }, '', location.hash); ROUTE_LAST = location.hash;
+    } else {
+      history.replaceState({ route: '#/library' }, '', '#/library'); ROUTE_LAST = '#/library';
+    }
+  } catch (_) {}
+  BOOTING = false;
   // A cart started before sign-up: bring it back so the purchase can finish.
   try { if (readCart().tier) show('plans'); } catch (_) {}
   try {
     const lp = new URLSearchParams(location.search);
     if (lp.get('linked')) {
       idle('Linked with ' + lp.get('linked') + '. You can sign in that way from now on.');
-      history.replaceState({}, '', location.pathname);
+      history.replaceState({}, '', location.pathname + location.hash);
     }
     if (lp.get('checkout')) {
       const ref = lp.get('checkout');
-      history.replaceState({}, '', location.pathname);
+      history.replaceState({}, '', location.pathname + location.hash);
       confirmCheckout(ref);
     }
   } catch (_) {}
+  // A link that names a place opens there, not on the library.
+  if (ROUTE_LAST !== '#/library') await applyRoute();
 });
 </script>
 </body>

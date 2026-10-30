@@ -778,7 +778,8 @@ class TestBalanceInHeader(unittest.TestCase):
     def test_it_opens_the_plan_screen(self):
         html = self._html()
         self.assertIn("$('#balchip').onclick", html)
-        self.assertIn("setSetTab('plan')", html)
+        # one history entry for the tap, so Back undoes it in one press
+        self.assertIn("setSetTab('plan', 'replace')", html)
 
     def test_it_refreshes_when_the_number_can_have_moved(self):
         html = self._html()
