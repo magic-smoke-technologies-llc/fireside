@@ -291,12 +291,14 @@
   .addpanel[hidden]{display:none}
   /* a series page is a shelf of its own: list what is there, let them pick */
   .serlist{margin-top:12px;display:flex;flex-direction:column;gap:2px;max-height:44vh;overflow:auto}
-  .serrow{display:flex;align-items:flex-start;gap:10px;padding:8px 6px;border-radius:8px;cursor:pointer}
+  .serrow{display:flex;align-items:flex-start;gap:10px;padding:9px 6px;border-radius:8px;cursor:pointer;
+    font-size:14px;line-height:1.35;color:var(--text);text-transform:none;letter-spacing:0}
   .serrow:hover{background:var(--raise)}
-  .serrow input{margin-top:3px;flex:0 0 auto}
-  .serrow .sert{color:var(--fg)}
-  .serrow .serm{display:block;color:var(--faint);font-size:12px}
+  .serrow input{margin-top:2px;flex:0 0 auto;width:18px;height:18px}
+  .serrow .sert{display:block;color:var(--text);font-size:15px}
+  .serrow .serm{display:block;color:var(--faint);font-size:12px;margin-top:2px}
   .serrow.have .sert{color:var(--soft)}
+  .serempty{color:var(--faint);padding:8px 0}
   /* get started: the first-run guide, on an empty or unvoiced library */
   .welcome{margin-top:24px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
   .welcome[hidden]{display:none}
@@ -365,8 +367,10 @@
      no way to reach it, and the Delete button is the last thing in it. */
   .modal{position:fixed;inset:0;z-index:90;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;overscroll-behavior:contain;background:#0009;padding:20px}
   .modal[hidden]{display:none}
-  .modal .sheet{width:100%;max-width:420px;margin:auto;max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow-y:auto;overscroll-behavior:contain;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px;box-shadow:0 20px 60px #000a}
-  .modal .sheet h3{font:600 20px var(--serif);margin-bottom:4px}
+  .modal .sheet{position:relative;width:100%;max-width:420px;margin:auto;max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow-y:auto;overscroll-behavior:contain;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px;box-shadow:0 20px 60px #000a}
+  .modal .sheet h3{font:600 20px var(--serif);margin-bottom:4px;padding-right:36px}
+  .xclose{position:absolute;top:10px;right:10px;width:34px;height:34px;padding:0;line-height:1;
+    font-size:20px;border-radius:50%;color:var(--soft)}
   .modal .connrow{justify-content:flex-end;flex-wrap:wrap}
   .setrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
   .setrow input{flex:1 1 170px;min-width:0}
@@ -501,10 +505,11 @@
       <div class="addpanel" id="serpick" hidden style="margin-top:12px">
         <p class="sub" id="sertitle"></p>
         <div class="serlist" id="serlist" role="group" aria-label="Works on this page" data-t-aria="Works on this page"></div>
+        <p class="small" id="serstatus" role="status" aria-live="polite" hidden></p>
         <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
           <button class="btn quiet" id="serall" type="button" data-t="Select all">Select all</button>
           <button class="btn" id="serpull" type="button" data-t="Pull selected">Pull selected</button>
-          <button class="btn quiet" id="sercancel" type="button">Cancel</button>
+          <button class="btn quiet" id="sercancel" type="button" data-t="Cancel">Cancel</button>
         </div>
       </div>
       <p class="hint" data-t="A locked AO3 work needs your cookie under Settings, or drop the work&#x27;s EPUB.">A locked AO3 work needs your cookie under Settings, or drop the work's EPUB.</p>
@@ -909,6 +914,7 @@
 
 <div class="modal" id="settingsdlg" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="Book settings" data-t-aria="Book settings">
+    <button class="btn quiet xclose" id="settingsx" type="button" aria-label="Close" data-t-aria="Close">×</button>
     <h3 data-t="Book settings">Book settings</h3>
     <p class="small" id="stitle"></p>
     <label data-t="Title">Title</label>
@@ -2867,7 +2873,7 @@ function showSeries(ser) {
     cb.onchange = serBtn;
     const box = document.createElement('span');
     const t = document.createElement('span'); t.className = 'sert';
-    t.textContent = w.title || w.url;
+    t.textContent = w.title || T('Untitled work');
     const m = document.createElement('span'); m.className = 'serm';
     const bits = [];
     if (w.words) bits.push(T('{n} words', { n: w.words.toLocaleString() }));
@@ -2887,22 +2893,53 @@ $('#serall').onclick = () => {
   serBtn();
 };
 $('#sercancel').onclick = () => { clearSeries(); idle(''); };
+function serStatus(text) {
+  const el = $('#serstatus'); if (!el) return;
+  el.hidden = !text; el.textContent = text || '';
+}
 $('#serpull').onclick = async () => {
   if (!PENDING_SERIES) return;
   const picks = serPicks();
   if (!picks.length) { idle(T('Pick at least one work to pull.')); return; }
-  const ser = PENDING_SERIES; clearSeries();
-  busy(T('Pulling {n} works from {name}…', { n: picks.length, name: ser.title || T('that page') }));
-  try {
-    const d = await jpost('/import/series', { user: USER, url: ser.page, picks });
-    await loadLibrary();
-    const ok = (d.imported || []).length, bad = (d.failed || []).length;
-    if (bad) fail(failure(T('Pulled {ok} of {total}. {bad} did not import.',
-      { ok, total: ok + bad, bad }), 207, d));
-    else idle(ok === 1 ? T('Pulled 1 work into "{name}".', { name: d.title })
-                       : T('Pulled {n} works into "{name}".', { n: ok, name: d.title }));
-  } catch (e) { fail(e); }
+  const ser = PENDING_SERIES;
+  const byUrl = new Map((ser.works || []).map(w => [w.url, w]));
+  // One work per request: the batch endpoint is one long silence, and a
+  // silence is what made her think nothing had happened. Same validation per
+  // work (the page is re-read, only its own links import), and the status
+  // line moves for each one.
+  $('#serpull').disabled = true; $('#serall').disabled = true;
+  const ok = [], bad = [];
+  for (let i = 0; i < picks.length; i++) {
+    const w = byUrl.get(picks[i]) || { url: picks[i] };
+    const name = w.title || T('this work');
+    serStatus(T('Pulling {i} of {n}: {title}', { i: i + 1, n: picks.length, title: name }));
+    try {
+      const d = await jpost('/import/series', { user: USER, url: ser.page, picks: [picks[i]] });
+      if ((d.imported || []).length) ok.push(name);
+      else bad.push({ title: name, detail: (d.failed || [{}])[0] });
+    } catch (e) {
+      bad.push({ title: name, detail: (e.data && (e.data.error || e.data.detail)) || e.message });
+    }
+  }
+  serStatus('');
+  $('#serall').disabled = false;
+  const name = ser.title || T('that page');
+  try { await loadLibrary(); } catch (e) { /* the shelf refreshes on the next view anyway */ }
+  if (bad.length) {
+    const names = bad.map(b => b.title).slice(0, 3).join(', ');
+    $('#serstatus').hidden = false;
+    $('#serstatus').textContent = T('Pulled {ok} of {total}. Did not import: {names}',
+      { ok: ok.length, total: picks.length, names });
+    $('#serpull').disabled = false;
+    serBtn();
+    idle(T('Pulled {ok} of {total} from {name}.', { ok: ok.length, total: picks.length, name }));
+    return;
+  }
+  clearSeries();
+  idle(ok.length === 1 ? T('Pulled 1 work into "{name}".', { name })
+                       : T('Pulled {n} works into "{name}".', { n: ok.length, name }));
 };
+$('#settingsx').onclick = () => { $('#settingsdlg').hidden = true; };
 async function ingestFile(f) {
   needUser(); $('#err').textContent = '';
   try { const b64 = await fileB64(f);

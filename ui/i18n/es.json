@@ -174,8 +174,6 @@
   "Pull {n} selected": "Traer {n} seleccionadas",
   "Pulled 1 work into \"{name}\".": "Se trajo 1 obra a \"{name}\".",
   "Pulled {n} works into \"{name}\".": "Se trajeron {n} obras a \"{name}\".",
-  "Pulled {ok} of {total}. {bad} did not import.": "Se trajeron {ok} de {total}. {bad} no se importaron.",
-  "Pulling {n} works from {name}…": "Trayendo {n} obras de {name}…",
   "Purchase": "Compra",
   "Purchase complete.": "Compra completada.",
   "Queue": "Cola",
@@ -379,6 +377,11 @@
   "{n} voices on this book.": "{n} voces en este libro.",
   "From": "De",
   "Please confirm": "Confirma",
-  "Yes, do it": "Sí, hazlo"
+  "Yes, do it": "Sí, hazlo",
+  "Untitled work": "Obra sin título",
+  "this work": "esta obra",
+  "Pulling {i} of {n}: {title}": "Trayendo {i} de {n}: {title}",
+  "Pulled {ok} of {total}. Did not import: {names}": "Traje {ok} de {total}. No importaron: {names}",
+  "Pulled {ok} of {total} from {name}.": "Traje {ok} de {total} de {name}."
  }
 }
