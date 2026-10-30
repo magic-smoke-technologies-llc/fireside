@@ -377,6 +377,8 @@
   "Not voiced yet. Use Convert to voice it.": "Aún sin voz. Usa Convertir para ponerle voz.",
   "1 voice on this book.": "1 voz en este libro.",
   "{n} voices on this book.": "{n} voces en este libro.",
-  "From": "De"
+  "From": "De",
+  "Please confirm": "Confirma",
+  "Yes, do it": "Sí, hazlo"
  }
 }
