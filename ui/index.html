@@ -360,9 +360,12 @@
   .chapcard .cbadge.ready{color:var(--ready);border-color:var(--ready)}
   .chapcard .cbadge.avail{color:var(--flame);border-color:var(--flame)}
   .chapcard .cbadge.fail{color:var(--warn);border-color:var(--warn)}
-  .modal{position:fixed;inset:0;z-index:90;display:grid;place-items:center;background:#0009;padding:20px}
+  /* A sheet taller than the screen scrolls. Book settings is long (meta, series,
+     cover, copies, delete); place-items:center cut the bottom off on a phone with
+     no way to reach it, and the Delete button is the last thing in it. */
+  .modal{position:fixed;inset:0;z-index:90;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;overscroll-behavior:contain;background:#0009;padding:20px}
   .modal[hidden]{display:none}
-  .modal .sheet{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px;box-shadow:0 20px 60px #000a}
+  .modal .sheet{width:100%;max-width:420px;margin:auto;max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow-y:auto;overscroll-behavior:contain;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px;box-shadow:0 20px 60px #000a}
   .modal .sheet h3{font:600 20px var(--serif);margin-bottom:4px}
   .modal .connrow{justify-content:flex-end;flex-wrap:wrap}
   .setrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
@@ -959,6 +962,17 @@
       <button class="btn quiet" id="sdelbookbtn" type="button" data-t="Remove this book from my library">Remove this book from my library</button>
     </div>
     <div class="connrow" style="margin-top:16px"><button class="btn" id="scovdone" type="button" data-t="Done">Done</button></div>
+  </div>
+</div>
+
+<div class="modal" id="askdlg" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Please confirm" data-t-aria="Please confirm">
+    <h3 data-t="Please confirm">Please confirm</h3>
+    <p class="small" id="asktext"></p>
+    <div class="connrow" style="margin-top:16px">
+      <button class="btn quiet" id="askno" type="button" data-t="Cancel">Cancel</button>
+      <button class="btn" id="askyes" type="button" data-t="Yes, do it">Yes, do it</button>
+    </div>
   </div>
 </div>
 
@@ -3987,10 +4001,28 @@ $('#scovrmbtn').onclick = async () => {
   try { await jpost('/cover/clear', { book: book.id }); await settingsReload('Cover removed.'); }
   catch (err) { fail(err); }
 };
+// A native confirm() belongs to the browser, not to this page. Inside an app's
+// WebView it can take the tap and never call back, which reads as a button that
+// does nothing. Same job, in the page, in the page's own language.
+let ASK = null;
+function askConfirm(text) {
+  return new Promise(resolve => {
+    $('#asktext').textContent = text;
+    $('#askdlg').hidden = false; ASK = resolve;
+    $('#askyes').focus();
+  });
+}
+function askDone(v) {
+  $('#askdlg').hidden = true;
+  const r = ASK; ASK = null; if (r) r(v);
+}
+$('#askyes').onclick = () => askDone(true);
+$('#askno').onclick = () => askDone(false);
+
 $('#srmallbtn').onclick = async () => {
   if (!book) return;
-  if (!confirm(T('Remove every voice from {book}? The book and its text stay.',
-    { book: book.title || T('this book') }))) return;
+  if (!(await askConfirm(T('Remove every voice from {book}? The book and its text stay.',
+    { book: book.title || T('this book') })))) return;
   $('#err').textContent = ''; busy(T('Removing every voice…'));
   try { await jpost('/book/renditions/delete', { book: book.id, all: true });
     await settingsReload(T('Removed every voice.')); }
@@ -3998,8 +4030,8 @@ $('#srmallbtn').onclick = async () => {
 };
 $('#sdelbookbtn').onclick = async () => {
   if (!book) return;
-  if (!confirm(T('Remove {book} from your library? Its voices go with it.',
-    { book: book.title || T('this book') }))) return;
+  if (!(await askConfirm(T('Remove {book} from your library? Its voices go with it.',
+    { book: book.title || T('this book') })))) return;
   $('#err').textContent = ''; busy(T('Removing the book…'));
   try {
     await jpost('/book/delete', { book: book.id });
