@@ -290,9 +290,10 @@
   .addpanel{margin-top:16px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
   .addpanel[hidden]{display:none}
   /* a series page is a shelf of its own: list what is there, let them pick */
-  .serlist{margin-top:12px;display:flex;flex-direction:column;gap:2px;max-height:44vh;overflow:auto}
-  .serrow{display:flex;align-items:flex-start;gap:10px;padding:9px 6px;border-radius:8px;cursor:pointer;
+  .serlist{margin-top:12px;display:flex;flex-direction:column;gap:2px;max-height:44vh;overflow-y:auto;overflow-x:hidden}
+  .serrow{display:flex;align-items:flex-start;gap:10px;padding:9px 6px;border-radius:8px;cursor:pointer;min-width:0;
     font-size:14px;line-height:1.35;color:var(--text);text-transform:none;letter-spacing:0}
+  .serrow>span{min-width:0;flex:1 1 auto;overflow-wrap:anywhere}
   .serrow:hover{background:var(--raise)}
   .serrow input{margin-top:2px;flex:0 0 auto;width:18px;height:18px}
   .serrow .sert{display:block;color:var(--text);font-size:15px}
