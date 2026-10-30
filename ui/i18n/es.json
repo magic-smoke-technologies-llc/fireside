@@ -382,6 +382,7 @@
   "this work": "esta obra",
   "Pulling {i} of {n}: {title}": "Trayendo {i} de {n}: {title}",
   "Pulled {ok} of {total}. Did not import: {names}": "Traje {ok} de {total}. No importaron: {names}",
-  "Pulled {ok} of {total} from {name}.": "Traje {ok} de {total} de {name}."
+  "Pulled {ok} of {total} from {name}.": "Traje {ok} de {total} de {name}.",
+  "Off. This is the only account on this server, so nothing forces it yet. Turn it on and every login asks for a code; once a second account exists, it is required.": "Desactivado. Es la única cuenta de este servidor, así que nada lo exige todavía. Si lo activas, cada inicio de sesión pedirá un código; cuando exista una segunda cuenta, será obligatorio."
  }
 }

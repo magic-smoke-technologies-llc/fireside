@@ -61,6 +61,41 @@ class TwoFactorAtTheFold(unittest.TestCase):
         self.assertIsNone(auth.session_user(self.conn, tok))
         self.assertEqual(auth.pending_state(self.conn, tok), auth.PENDING_ENROLL)
 
+    def test_the_only_account_on_the_box_is_not_held_at_enrolment(self):
+        # first run on your own box: the account you just made does not get a
+        # wall in front of the app it is the first to see (Chris, 10-28).
+        solo = db.connect(":memory:")
+        self.addCleanup(solo.close)
+        mine = auth.local_register(solo, "owner", "hunter2hunter2")
+        self.assertTrue(auth.is_admin(solo, mine))
+        tok = auth.create_session(solo, mine, "local")
+        self.assertEqual(auth.session_user(solo, tok), mine)
+        self.assertEqual(auth.pending_state(solo, tok), "")
+
+    def test_that_skip_ends_at_the_second_account(self):
+        # the exemption is self-closing: it is not a flag, and once the box has
+        # somebody else on it the admin rule applies again at the next login.
+        solo = db.connect(":memory:")
+        self.addCleanup(solo.close)
+        mine = auth.local_register(solo, "owner", "hunter2hunter2")
+        tok = auth.create_session(solo, mine, "local")
+        self.assertEqual(auth.session_user(solo, tok), mine)
+        other = auth.local_register(solo, "friend", "hunter2hunter2")
+        self.assertFalse(auth.is_admin(solo, other))
+        self.assertTrue(auth.bootstrap_skip(solo, mine) is False)
+        tok = auth.create_session(solo, mine, "local")
+        self.assertIsNone(auth.session_user(solo, tok))
+        self.assertEqual(auth.pending_state(solo, tok), auth.PENDING_ENROLL)
+
+    def test_the_skip_is_a_deferral_not_a_drop(self):
+        # the role rule still says an admin carries a factor: that is what
+        # stops an admin turning it off, wall or no wall.
+        solo = db.connect(":memory:")
+        self.addCleanup(solo.close)
+        mine = auth.local_register(solo, "owner", "hunter2hunter2")
+        self.assertTrue(auth.must_have_factor(solo, mine))
+        self.assertFalse(auth.factor_required(solo, mine))
+
     def test_a_plain_user_is_never_forced_and_no_env_var_pretends_otherwise(self):
         # FIRESIDE_REQUIRE_2FA used to gate admins and no longer gates anything.
         # A setting that is read and ignored is worse than no setting: it reads

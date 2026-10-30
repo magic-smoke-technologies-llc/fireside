@@ -2440,7 +2440,13 @@ async function twofaSubmit() {
       const done = document.createElement('button');
       done.className = 'btn'; done.type = 'button'; done.textContent = T('I saved them');
       done.style.marginTop = '14px';
-      done.onclick = () => { $('#twofadlg').hidden = true; if (TWOFA.onDone) TWOFA.onDone(); };
+      // Enrolling from the login screen has no onDone callback: the caller only
+      // knows how to finish a code, not a new secret. Without the reload the
+      // page stayed locked after the last button, which is a dead end.
+      done.onclick = () => {
+        $('#twofadlg').hidden = true;
+        if (TWOFA.onDone) TWOFA.onDone(); else location.reload();
+      };
       box.append(done);
     } else {
       await jpost('/2fa/verify', rec ? { recovery: rec } : { code });
@@ -2468,6 +2474,8 @@ async function loadTwofa() {
   if (on) {
     box.textContent = 'On. ' + (st.recovery_left || 0) + ' recovery code(s) left.'
       + (st.required ? ' Administrator accounts must keep this on.' : '');
+  } else if (st.deferred) {
+    box.textContent = T('Off. This is the only account on this server, so nothing forces it yet. Turn it on and every login asks for a code; once a second account exists, it is required.');
   } else if (st.required) {
     box.textContent = T('Required for this account: an administrator always carries a second factor.');
   } else {

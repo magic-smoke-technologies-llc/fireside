@@ -46,6 +46,9 @@ class ResetSecondFactor(unittest.TestCase):
 
     def test_the_next_login_must_enrol_again(self):
         self.assertEqual(self._run("--user", "chris", "--confirm", "chris"), 0)
+        # a second account, because a box with exactly one account defers the
+        # admin rule by design (bootstrap_skip); this is the ordinary case.
+        auth.local_register(self.conn, "sam", "hunter2hunter2")
         tok = auth.create_session(self.conn, self.root, "local")
         self.assertIsNone(auth.session_user(self.conn, tok))
         self.assertEqual(auth.pending_state(self.conn, tok), auth.PENDING_ENROLL)

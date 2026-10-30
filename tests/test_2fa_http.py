@@ -86,9 +86,39 @@ class SecondFactorOverHTTP(unittest.TestCase):
         return info, out
 
     # ---- the admin is forced, everyone else may opt in ----------------
-    def test_admin_is_held_at_enrolment(self):
-        self._register("chris")                      # first account = admin
+    def test_status_with_no_session_is_an_empty_answer_not_a_refusal(self):
+        # the page asks /2fa on every load, before it can know whether anyone
+        # is signed in. A 401 there put a console error on a stranger's page, so
+        # the honest answer is the empty state, the same shape /me gives.
+        s, st = self._jget("/2fa")
+        self.assertEqual(s, 200)
+        self.assertEqual(st["twofa"], "")
+        self.assertFalse(st["enrolled"])
+        self.assertFalse(st["required"])
+        # and it stays an empty answer: nothing here mints authority
         self.assertEqual(self._status(200), 401)
+
+    def test_the_first_account_is_not_walled_on_first_run(self):
+        # your own box, your own door: nothing is forced on the only account
+        # there is, and the panel says so instead of pretending it is optional.
+        self._register("chris")                      # first account = admin
+        self.assertEqual(self._status(200), 200)
+        s, st = self._jget("/2fa")
+        self.assertTrue(st["admin"])
+        self.assertFalse(st["enrolled"])
+        self.assertTrue(st["deferred"])
+
+    def test_admin_is_held_at_enrolment_once_the_box_is_not_just_yours(self):
+        self._register("chris")                      # first account = admin
+        self.assertEqual(self._status(200), 200)     # solo: deferred
+        self._post("/auth/logout", {})
+        self.jar.clear()
+        self._register("sam")                        # second account, plain
+        self._post("/auth/logout", {})
+        self.jar.clear()
+        self._post("/auth/local/login",
+                   {"username": "chris", "password": "longenough"})
+        self.assertEqual(self._status(200), 401, "the skip ends at the second account")
         self.assertEqual(self._body(401).get("twofa"), auth.PENDING_ENROLL)
         _info, out = self._enrol()
         self.assertEqual(len(out["recovery"]), totp.RECOVERY_CODES)
@@ -97,6 +127,7 @@ class SecondFactorOverHTTP(unittest.TestCase):
         s, st = self._jget("/2fa")
         self.assertEqual(st["twofa"], "")
         self.assertTrue(st["enrolled"])
+        self.assertFalse(st["deferred"])
 
     def test_plain_user_needs_no_factor_until_they_enrol(self):
         self._register("chris")                      # admin, forced

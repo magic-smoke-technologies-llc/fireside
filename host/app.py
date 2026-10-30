@@ -2349,11 +2349,16 @@ class App:
         factor, uid = self._twofa_who(q)
         admin = bool(uid) and auth.is_admin(self.conn, uid)
         forced = auth.must_have_factor(self.conn, uid)
+        # an admin who is the only account on the box is not held at an
+        # enrolment wall (first run, own front door); the rule is deferred, not
+        # dropped, and it applies again the moment a second account exists.
+        deferred = forced and auth.bootstrap_skip(self.conn, uid)
         return 200, {
             "twofa": factor if factor in auth.PENDING else "",
             "enrolled": auth.enrolled(self.conn, uid),
             "recovery_left": auth.recovery_code_left(self.conn, uid),
             "required": forced,
+            "deferred": bool(deferred) and not auth.enrolled(self.conn, uid),
             "admin": admin,
             "can_disable": bool(uid) and not forced,
         }
@@ -2678,6 +2683,12 @@ PUBLIC_ROUTES = {"/", "/index.html", "/i18n.js", "/favicon.ico", "/health", "/au
                  "/auth/policy", "/auth/forgot", "/auth/reset", "/me", "/plans",
                  "/privacy", "/terms", "/delete-account",
                  "/manifest.webmanifest", "/sw.js",
+                 # The page asks /2fa on every load, before it can know whether
+                 # a session exists. Answering 401 there put a console error on
+                 # a signed-out visitor's page and on the very screen that is
+                 # asking them to sign in. With no session the honest answer is
+                 # an empty state, the same shape /me gives, so it is public.
+                 "/2fa",
                  "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
 
 # What a half-session may still reach: the screen that finishes the factor,

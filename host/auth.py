@@ -404,8 +404,39 @@ def must_have_factor(conn, user_id):
 
     Everyone else stays optional for now; whether every account needs a factor
     is Chris's call when sales open, and no flag here pretends otherwise.
+
+    This is the ROLE rule, and `factor_required` is the effective one. The two
+    are different on purpose: see bootstrap_skip.
     """
     return bool(user_id) and is_admin(conn, user_id)
+
+
+def bootstrap_skip(conn, user_id):
+    """Is this account the only one on the box?
+
+    A self-hosted install starts with exactly one account, made by the person
+    who just set up the box. Putting an enrolment wall in front of that first
+    login is a wall in front of your own front door, before you have seen the
+    app at all (Chris, 10-28: "Let the first account skip it"). So the one
+    account on a box is not forced to enrol.
+
+    The exemption closes itself. The moment a second account exists the box is
+    no longer one person's, and the admin rule applies again at the next login.
+    It is not a setting and not a role: nobody can hold it open.
+    """
+    if not user_id:
+        return False
+    row = conn.execute("SELECT COUNT(*) c FROM users").fetchone()
+    return int(row["c"] or 0) <= 1
+
+
+def factor_required(conn, user_id):
+    """What a login for this account has to satisfy right now.
+
+    An administrator, unless it is the first and only account on the box
+    (bootstrap_skip). Everyone else optional.
+    """
+    return must_have_factor(conn, user_id) and not bootstrap_skip(conn, user_id)
 
 
 def factor_for(conn, user_id):
@@ -417,7 +448,7 @@ def factor_for(conn, user_id):
     """
     if enrolled(conn, user_id):
         return PENDING_CODE
-    if must_have_factor(conn, user_id):
+    if factor_required(conn, user_id):
         return PENDING_ENROLL
     return FACTOR_OK
 
