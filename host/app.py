@@ -4142,6 +4142,19 @@ def make_handler(app):
                     tok = authz[7:]
             return tok
 
+        def _log_fault(self):
+            """Print the traceback with a short reference and return the reference.
+
+            The client gets the reference and nothing else: an exception message
+            can carry SQL, a hostname or a path. An operator matches the two.
+            """
+            import traceback
+            ref = os.urandom(4).hex()
+            print("fault %s %s %s" % (ref, self.command, self.path),
+                  file=sys.stderr)
+            traceback.print_exc()
+            return ref
+
         def _read_body(self, max_bytes):
             """(raw, None), or (None, (status, message)) when the body is refused.
 
@@ -4469,11 +4482,9 @@ def make_handler(app):
             # so say 503 and log it.
             try:
                 q["_user"] = auth.session_user(app.conn, self._token()) or ""
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                return self._json(503, {"error": "session lookup failed: %s: %s"
-                                                 % (type(e).__name__, e)})
+            except Exception:
+                return self._json(503, {"error": "session lookup failed",
+                                        "ref": self._log_fault()})
             q["_token"] = self._token()
             # ---- the second factor gate, once ------------------------------
             # A half-session authorises nothing except finishing the factor.
@@ -4506,8 +4517,9 @@ def make_handler(app):
                 return self._json(401, {"error": "auth required"})
             try:
                 status, payload = getattr(app, name)(q, body)
-            except Exception as e:
-                return self._json(500, {"error": "%s: %s" % (type(e).__name__, e)})
+            except Exception:
+                return self._json(500, {"error": "internal error",
+                                        "ref": self._log_fault()})
             if isinstance(payload, dict) and "_html" in payload:
                 page = payload["_html"]
                 if payload.get("_locale"):

@@ -146,14 +146,23 @@ class TestDispatch(Base):
             code, _ = self.status(self.post, path, raw=big)
             self.assertEqual(code, 413, path)
 
-    def test_a_handler_that_throws_is_500_with_the_reason(self):
+    def test_a_handler_that_throws_is_500_and_leaks_nothing_but_a_reference(self):
+        import contextlib
+        import io
+
         def boom(q, body):
-            raise RuntimeError("kaboom")
+            raise RuntimeError("kaboom SELECT secret FROM t")
 
         self.app.health = boom
-        code, r = self.status(self.get, "/health")
+        noise = io.StringIO()
+        with contextlib.redirect_stderr(noise):
+            code, r = self.status(self.get, "/health")
         self.assertEqual(code, 500)
-        self.assertIn("kaboom", r.read().decode())
+        body = json.loads(r.read())
+        self.assertNotIn("kaboom", json.dumps(body))
+        self.assertEqual(body["error"], "internal error")
+        self.assertIn(body["ref"], noise.getvalue())         # the log has the key
+        self.assertIn("kaboom", noise.getvalue())            # and the reason
 
     def test_a_session_lookup_that_throws_is_503_and_logged(self):
         """The lookup runs before routing, outside any handler's try, so a raise
@@ -170,8 +179,9 @@ class TestDispatch(Base):
                 code, r = self.status(self.get, "/library")
         self.assertEqual(code, 503)
         body = json.loads(r.read())
-        self.assertIn("db gone", body["error"])
-        self.assertIn("db gone", noise.getvalue())      # and it went in the log too
+        self.assertNotIn("db gone", json.dumps(body))   # the client gets no detail
+        self.assertIn("db gone", noise.getvalue())      # the log does
+        self.assertIn(body["ref"], noise.getvalue())
 
     def test_html_response_shape(self):
         r = self.get("/privacy")
