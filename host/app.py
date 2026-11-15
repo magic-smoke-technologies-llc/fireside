@@ -57,6 +57,17 @@ HOST_VERSION = "2.0"
 DELETE_PHRASES = {"delete my account", "eliminar mi cuenta"}
 
 
+def _swallowed(where, exc):
+    """Say on stderr that a best-effort step failed, and carry on.
+
+    These steps (a cover, a notice, an idempotency row) must never fail the
+    request they ride on, but a bare `pass` also hides a real bug behind the
+    same silence as "nothing to do".
+    """
+    print("fireside: %s failed: %s: %s" % (where, type(exc).__name__,
+                                           str(exc)[:200]), file=sys.stderr)
+
+
 def _detail(e, fallback):
     """What the reader is told when ours broke.
 
@@ -303,9 +314,9 @@ class App:
                 "status=excluded.status, response=excluded.response",
                 (uid, key, int(status), json.dumps(payload), db.now()))
             self.conn.commit()
-        except Exception:
+        except Exception as e:
             # A cache is never allowed to fail the request it is caching.
-            pass
+            _swallowed("idempotency cache", e)
 
     def _claim_payment(self, event_id, kind, uid, reference, chars=0, detail=""):
         return paymentapply.claim_payment(self.conn, event_id, kind, uid,
@@ -1252,8 +1263,8 @@ class App:
             return
         try:
             library.set_cover(self.conn, self.storage, book_id, data, mime)
-        except Exception:               # a cover is a nicety; never fail an import for it
-            pass
+        except Exception as e:          # a cover is a nicety; never fail an import for it
+            _swallowed("cover save", e)
 
     def _cover_by_isbn(self, isbn):
         """Fetch a cover for an ISBN from a keyless public source, or None."""
@@ -1478,8 +1489,8 @@ class App:
             if got:
                 try:
                     library.set_cover(self.conn, self.storage, book_id, got[0], got[1])
-                except Exception:
-                    pass
+                except Exception as e:
+                    _swallowed("cover save", e)
         return 200, {"ok": True, "book": self._book_payload(book_id)}
 
     def _book_payload(self, book_id):
@@ -1627,7 +1638,8 @@ class App:
             try:
                 if p.obj.matches(req):
                     return p
-            except Exception:
+            except Exception as e:      # one broken reader must not hide the rest
+                _swallowed("reader %s matches()" % getattr(p, "id", "?"), e)
                 continue
         return None
 
@@ -1816,8 +1828,8 @@ class App:
                 notices.notify(c, user, "job", "Could not convert %s. %s"
                                % (title, (j.get("error") or "").strip()[:240]),
                                route=route, key="run:" + jid)
-        except Exception:                  # a notice never costs a finished run
-            pass
+        except Exception as e:             # a notice never costs a finished run
+            _swallowed("run notice", e)
 
     # ---- notifications: what happened while you were elsewhere ---------------
     def notices_list(self, q, body):
