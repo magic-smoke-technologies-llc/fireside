@@ -87,10 +87,13 @@ def topup(conn, user_id, amount, currency="USD", note="", entry_id=""):
     instead of paying twice (a retried webhook, a re-read of the same period)."""
     conn.execute("INSERT OR IGNORE INTO balances(user_id,currency,amount) VALUES(?,?,0)",
                  (user_id, currency))
-    conn.execute("UPDATE balances SET amount=amount+?,currency=? WHERE user_id=?",
-                 (float(amount), currency, user_id))
+    # The ledger row goes first: with an entry_id a repeat raises here, before
+    # the balance has moved, so nothing is left half-applied on the shared
+    # connection.
     _entry(conn, user_id, "topup", float(amount), currency, None, None, note,
            entry_id=entry_id)
+    conn.execute("UPDATE balances SET amount=amount+?,currency=? WHERE user_id=?",
+                 (float(amount), currency, user_id))
     conn.commit()
     return balance(conn, user_id)
 

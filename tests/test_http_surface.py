@@ -146,6 +146,28 @@ class TestDispatch(Base):
             code, _ = self.status(self.post, path, raw=big)
             self.assertEqual(code, 413, path)
 
+    def test_a_link_that_cannot_be_fetched_is_a_plain_error_not_a_500(self):
+        import urllib.error
+        from unittest import mock
+        from host import netguard
+
+        cases = [
+            (netguard.BlockedAddress("that link points at a private network address"),
+             400, "private network"),
+            (urllib.error.HTTPError("http://x", 404, "nf", {}, None), 502, "HTTP 404"),
+            (urllib.error.URLError("dns"), 502, "could not reach"),
+            (TimeoutError("slow"), 502, "could not reach"),
+        ]
+        for exc, want, text in cases:
+            with mock.patch.object(self.app, "_pick_reader") as pick:
+                pick.return_value.id = "fake"
+                pick.return_value.obj.read.side_effect = exc
+                for path in ("/import", "/import/preview"):
+                    code, r = self.status(self.post, path,
+                                          {"kind": "url", "url": "http://127.0.0.1:1/x"})
+                    self.assertEqual(code, want, (path, exc))
+                    self.assertIn(text, json.loads(r.read())["error"])
+
     def test_a_handler_that_throws_is_500_and_leaks_nothing_but_a_reference(self):
         import contextlib
         import io

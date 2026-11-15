@@ -35,6 +35,7 @@ import socket
 import threading
 import time
 import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -339,16 +340,21 @@ class App:
     def _credit_once(self, event_id, kind, uid, reference, chars, detail, credit):
         """Claim a provider event and run `credit()` for it, once.
 
-        True when this call did the crediting. If `credit` fails the claim is
-        released before the error goes on, so the retry is not told "already
+        `credit(entry_id)` must post a ledger row under that id: the ledger's own
+        primary key then refuses a second posting, so releasing the claim after
+        a failure that happened to land (a commit that errored late) cannot pay
+        twice. True when this call did the crediting. If `credit` fails the claim
+        is released before the error goes on, so the retry is not told "already
         credited" for money that never landed.
         """
         if not self._claim_payment(event_id, kind, uid, reference, chars, detail):
             return False
         if credit is not None:
             try:
-                credit()
-            except Exception:
+                credit("pay:" + event_id.strip())
+            except Exception as e:
+                if db.is_duplicate(e):
+                    return False     # the ledger already holds this payment
                 try:
                     self.conn.execute("DELETE FROM payment_events WHERE id=?",
                                       (event_id.strip(),))
@@ -916,6 +922,11 @@ class App:
             book = plugin.obj.read(req, self._make_fetch(plugin.obj, cred), cred)
         except contracts.Refused as e:
             return e.status, self._refusal(e, user, plugin)
+        except Exception as e:
+            failed = self._fetch_error(e)
+            if failed is None:
+                raise
+            return failed
         parsed = (getattr(book, "meta", None) or {}).get("draft")
         if not parsed:
             # A reader that does not produce a block-level draft (epub, ao3, web)
@@ -948,6 +959,11 @@ class App:
             # A plugin that can read the file but not turn it into a book says
             # so in its own words. That is a 422 with a reason, not a 500.
             return e.status, self._refusal(e, user, plugin)
+        except Exception as e:
+            failed = self._fetch_error(e)
+            if failed is None:
+                raise
+            return failed
         # Whatever identity the reader named, this account either already holds
         # that work or it does not. Importing again is a replace, not a second
         # copy: two of the same book on one shelf is a mistake, not a collection.
@@ -1057,6 +1073,11 @@ class App:
             found = reader.series(req, self._make_fetch(reader, cred), cred)
         except contracts.Refused as e:
             return e.status, self._refusal(e, user, plugin)
+        except Exception as e:
+            failed = self._fetch_error(e)
+            if failed is None:
+                raise
+            return failed
         if not isinstance(found, dict) or not found.get("works"):
             return 422, {"error": "not a series page",
                          "detail": "that page does not list works of its own"}
@@ -1759,6 +1780,24 @@ class App:
                 continue
         return None
 
+    def _fetch_error(self, e):
+        """(status, body) for a link that could not be fetched, else None.
+
+        These are the user's link failing, not the server: a refused address is
+        theirs to fix (400) and an unreachable or erroring site is upstream (502).
+        Anything else is a bug and stays a 500.
+        """
+        if isinstance(e, netguard.BlockedAddress):
+            return 400, {"error": str(e)}
+        if isinstance(e, urllib.error.HTTPError):
+            return 502, {"error": "could not fetch that link (HTTP %d)" % e.code}
+        if isinstance(e, (OSError, TimeoutError)):
+            return 502, {"error": "could not reach that link"}
+        if isinstance(e, RuntimeError) and str(e).startswith("HTTP "):
+            return 502, {"error": "could not fetch that link (%s)"
+                                  % str(e).split(" from ")[0]}
+        return None
+
     def _make_fetch(self, o, cred):
         hosts = tuple(o.credential_hosts() or []) if callable(
             getattr(o, "credential_hosts", None)) else ()
@@ -2080,9 +2119,9 @@ class App:
             return 402, {"error": "payment refused", "detail": receipt.detail}
         credited = {}
 
-        def credit():
+        def credit(entry_id):
             credited["total"] = accounting.topup(
-                self.conn, uid, chars, currency="chars",
+                self.conn, uid, chars, currency="chars", entry_id=entry_id,
                 note="purchase %.2f USD -> %d chars (%s)"
                      % (usd, chars, receipt.reference))
         if not self._credit_once(receipt.reference, "characters", uid,
@@ -2121,8 +2160,8 @@ class App:
         fresh = self._credit_once(
             p.reference, "characters", uid, p.reference, p.chars,
             "checkout confirmed",
-            (lambda: accounting.topup(
-                self.conn, uid, p.chars, currency="chars",
+            (lambda eid: accounting.topup(
+                self.conn, uid, p.chars, currency="chars", entry_id=eid,
                 note="purchase %d chars (%s)" % (p.chars, p.reference)))
             if p.chars else None)
         return 200, {"ok": True, "chars": p.chars, "credited": fresh,
@@ -2623,8 +2662,9 @@ class App:
         usd = cents / 100.0
         if not self._credit_once(
                 tid, "wallet", uid, tid, cents, "paddle transaction",
-                lambda: accounting.topup(self.conn, uid, usd, currency="USD",
-                                         note="wallet +$%.2f (%s)" % (usd, tid))):
+                lambda eid: accounting.topup(
+                    self.conn, uid, usd, currency="USD", entry_id=eid,
+                    note="wallet +$%.2f (%s)" % (usd, tid))):
             return {"credited": False, "detail": "already credited", "user": uid}
         return {"credited": True, "user": uid, "usd": usd}
 
@@ -2678,8 +2718,8 @@ class App:
             fresh = self._credit_once(
                 p.reference, "characters", p.user, p.reference, p.chars,
                 "webhook",
-                (lambda: accounting.topup(
-                    self.conn, p.user, p.chars, currency="chars",
+                (lambda eid: accounting.topup(
+                    self.conn, p.user, p.chars, currency="chars", entry_id=eid,
                     note="purchase %d chars (%s)" % (p.chars, p.reference)))
                 if p.chars and p.user else None)
             return 200, {"ok": True, "reference": ref, "applied": fresh,
@@ -2856,7 +2896,12 @@ class App:
         if self.rate_limiter is not None and not self.rate_limiter.allow(uid):
             return 429, {"error": "rate limited"}
         speech = self.host.speech[provider].obj
-        audio = speech.synth(text, voice, {"model": model, "speed": speed}, cred)
+        try:
+            audio = speech.synth(text, voice, {"model": model, "speed": speed}, cred)
+        except Exception as e:
+            # The caller's own voice server (a wrong key, a dead host) is theirs
+            # to read about; it is the sandbox's whole point. Not a server fault.
+            return 502, {"error": "the voice server failed", "detail": str(e)[:300]}
         data = getattr(audio, "data", None) or getattr(audio, "bytes", None) or b""
         if not data:
             return 502, {"error": "the voice server returned no audio"}
