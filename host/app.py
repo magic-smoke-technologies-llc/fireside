@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from host.host import Host
 import inspect
 
-from host import accounting, allowance, audit, auth, billing, connections, contracts, credentials, db, disambig, draft as drafts, erase, example, grants, i18n, jobs, keepwarm, library, mailer, netguard, notices, payments, playback, plans, pron, quota, ratelimit, reading, renderjob_runner, settings, stats, tags as tagmod
+from host import accounting, allowance, audit, auth, billing, bookmeta, connections, contracts, credentials, db, disambig, draft as drafts, erase, example, grants, i18n, jobs, keepwarm, library, mailer, netguard, notices, payments, playback, plans, pron, quota, ratelimit, reading, renderjob_runner, settings, stats, tags as tagmod
 from host.egress import fetch as _fetch
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1260,8 +1260,7 @@ class App:
     # almost always carries it), otherwise it is fetched by ISBN. Both paths are
     # generic: the host has no branch on which reader produced the book.
 
-    COVER_MAX_BYTES = 8 * 1024 * 1024
-    _COVER_URLS = ("https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false",)
+    COVER_MAX_BYTES = bookmeta.COVER_MAX_BYTES
 
     def _file_meta(self, book_id, book):
         """Whatever the file itself stated about the book, written down.
@@ -1307,22 +1306,7 @@ class App:
 
     def _cover_by_isbn(self, isbn):
         """Fetch a cover for an ISBN from a keyless public source, or None."""
-        isbn = re.sub(r"[^0-9Xx]", "", isbn or "")
-        if not re.fullmatch(r"\d{9}[\dXx]|\d{13}", isbn or ""):
-            return None
-        for tpl in self._COVER_URLS:
-            url = tpl.format(isbn=isbn)
-            try:
-                req = urllib.request.Request(
-                    url, headers={"User-Agent": "fireside/2 (cover lookup)"})
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    ctype = (r.headers.get("Content-Type") or "").split(";")[0]
-                    data = r.read(self.COVER_MAX_BYTES)
-                if data and len(data) > 100:
-                    return data, (ctype if ctype.startswith("image/") else "image/jpeg")
-            except Exception:
-                continue
-        return None
+        return bookmeta.cover_by_isbn(isbn)
 
     def cover_get(self, q, body):
         got = library.cover(self.conn, self.storage, q.get("book", ""))
@@ -1469,14 +1453,6 @@ class App:
                      "kept": kept, "freed": freed,
                      "storage": quota.usage(self.conn, self.storage, uid)}
 
-    # a cover URL is user input, so it only ever reaches the public internet:
-    # http(s), an image content-type (or a recognised image signature), and a
-    # host that does not resolve into a private / loopback / link-local range.
-    _IMAGE_MAGIC = ((b"\xff\xd8\xff", "image/jpeg"),
-                    (b"\x89PNG\r\n\x1a\n", "image/png"),
-                    (b"GIF87a", "image/gif"), (b"GIF89a", "image/gif"),
-                    (b"RIFF", "image/webp"))
-
     def _url_allowed(self, url):
         """True only for an http(s) URL whose host resolves to a public address.
         A cover URL is user input, so it must never reach this box's own
@@ -1484,30 +1460,7 @@ class App:
         return netguard.is_public_url(url)
 
     def _cover_from_url(self, url):
-        if not self._url_allowed(url):
-            return None
-        try:
-            req = urllib.request.Request(
-                url, headers={"User-Agent": "fireside/2 (cover fetch)"})
-            with netguard.opener().open(req, timeout=20) as r:
-                ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-                data = r.read(self.COVER_MAX_BYTES + 1)
-        except Exception:
-            return None
-        if not data or len(data) > self.COVER_MAX_BYTES:
-            return None
-        sniff = ""
-        for magic, m in self._IMAGE_MAGIC:
-            if data.startswith(magic):
-                sniff = m
-                break
-        if ctype.startswith("image/"):
-            mime = ctype
-        elif sniff:
-            mime = sniff
-        else:
-            return None
-        return data, mime
+        return bookmeta.cover_from_url(url, allowed=self._url_allowed)
 
     def cover_auto(self, q, body):
         book_id = body.get("book", "")
@@ -1528,73 +1481,20 @@ class App:
     # reader having typed any of it. OpenLibrary is keyless, so this works on a
     # fresh install. Nothing here overwrites the book's own title.
 
-    DETAILS_MAX_CHARS = 4000
-    _OL_EDITION = "https://openlibrary.org/isbn/{isbn}.json"
-    _OL_KEY = "https://openlibrary.org{key}.json"
-
     def _get_json(self, url):
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "fireside/2 (book details)"})
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return json.loads(r.read(4 * 1024 * 1024).decode("utf-8", "replace"))
+        return bookmeta.get_json(url)
 
     @staticmethod
     def _norm_isbn(isbn):
-        return re.sub(r"[^0-9Xx]", "", str(isbn or ""))
+        return bookmeta.norm_isbn(isbn)
 
     @staticmethod
     def _valid_isbn(isbn):
-        return bool(re.fullmatch(r"\d{9}[\dXx]|\d{13}", isbn or ""))
+        return bookmeta.valid_isbn(isbn)
 
     def _details_by_isbn(self, isbn):
         """Public metadata for an ISBN from OpenLibrary, or None."""
-        isbn = self._norm_isbn(isbn)
-        if not self._valid_isbn(isbn):
-            return None
-        try:
-            ed = self._get_json(self._OL_EDITION.format(isbn=isbn))
-        except Exception:
-            return None
-        out = {"isbn": isbn}
-        title = ed.get("title") or ""
-        if title and ed.get("subtitle"):
-            title += ": " + ed["subtitle"]
-        if title:
-            out["title"] = title
-        names = []
-        for a in (ed.get("authors") or [])[:6]:
-            key = a.get("key") if isinstance(a, dict) else None
-            if not key:
-                continue
-            try:
-                n = self._get_json(self._OL_KEY.format(key=key)).get("name")
-            except Exception:
-                n = ""
-            if n:
-                names.append(n)
-        if not names and ed.get("by_statement"):
-            names = [ed["by_statement"]]
-        if names:
-            out["author"] = ", ".join(names)
-        pubs = [p for p in (ed.get("publishers") or []) if p][:3]
-        if pubs:
-            out["publisher"] = ", ".join(pubs)
-        if ed.get("publish_date"):
-            out["published"] = str(ed["publish_date"])
-        desc = ed.get("description")
-        if not desc:
-            works = ed.get("works") or []
-            if works and isinstance(works[0], dict) and works[0].get("key"):
-                try:
-                    desc = self._get_json(
-                        self._OL_KEY.format(key=works[0]["key"])).get("description")
-                except Exception:
-                    desc = None
-        if isinstance(desc, dict):
-            desc = desc.get("value")
-        if desc:
-            out["description"] = str(desc).strip()[:self.DETAILS_MAX_CHARS]
-        return out
+        return bookmeta.details_by_isbn(isbn, get_json=self._get_json)
 
     def fetch_details(self, q, body):
         """Look a book up by ISBN and store what we learn. An ISBN in the body
