@@ -4112,6 +4112,12 @@ def _stale_claim(stamp):
     return (time.time() - when) > _PASS_CLAIM_SECONDS
 
 
+# The cookies that carry an OAuth round trip, by the name a caller uses for them.
+_OAUTH_COOKIES = {"state": auth.STATE_COOKIE, "link": auth.LINK_COOKIE,
+                  "claim": auth.CLAIM_COOKIE, "app": auth.APP_COOKIE,
+                  "pkce": auth.PKCE_COOKIE}
+
+
 def _int_env(name, default):
     try:
         return max(0, int(os.environ.get(name, "")))
@@ -4221,6 +4227,27 @@ def make_handler(app):
                 return None, (400, "request body must be a JSON object")
             return body, None
 
+        def _new_session(self, uid, kind):
+            return auth.create_session(app.conn, uid, kind,
+                                       ua=self._ua(), ip=self._ip())
+
+        def _session_cookie(self, token):
+            return self._cookie_str(auth.SESSION_COOKIE, token,
+                                    max_age=auth.SESSION_TTL)
+
+        def _oauth_cookies(self, **values):
+            """Set the short-lived sign-in cookies named in `values`, or clear all.
+
+            One list of names serves both: the cookies a start sets and the ones
+            a callback clears cannot drift apart, and a cookie added to the flow
+            is cleared with the rest.
+            """
+            if not values:
+                return [self._cookie_str(c, "", path="/auth", max_age=0)
+                        for c in _OAUTH_COOKIES.values()]
+            return [self._cookie_str(_OAUTH_COOKIES[k], v, path="/auth", max_age=600)
+                    for k, v in values.items()]
+
         def _ua(self):
             return (self.headers.get("User-Agent") or "")[:400]
 
@@ -4267,16 +4294,9 @@ def make_handler(app):
                     # PKCE providers (X) need a verifier kept for the callback.
                     verifier, _challenge = auth.new_pkce()
                     url = app.auth.authorize_url(pid, redirect_uri, state, verifier)
-                    return self._redirect(url, [
-                        self._cookie_str(auth.STATE_COOKIE, state, path="/auth", max_age=600),
-                        self._cookie_str(auth.LINK_COOKIE, uid if link else "",
-                                         path="/auth", max_age=600),
-                        self._cookie_str(auth.CLAIM_COOKIE, claim,
-                                         path="/auth", max_age=600),
-                        self._cookie_str(auth.APP_COOKIE, "1" if for_app else "",
-                                         path="/auth", max_age=600),
-                        self._cookie_str(auth.PKCE_COOKIE, verifier,
-                                         path="/auth", max_age=600)])
+                    return self._redirect(url, self._oauth_cookies(
+                        state=state, link=uid if link else "", claim=claim,
+                        app="1" if for_app else "", pkce=verifier))
                 if action == "callback":
                     if q.get("error"):
                         return self.send_error(400, "oauth error: %s" % q["error"])
@@ -4284,11 +4304,7 @@ def make_handler(app):
                         return self.send_error(400, "bad oauth state")
                     for_app = bool(self._cookie(auth.APP_COOKIE))
                     verifier = self._cookie(auth.PKCE_COOKIE)
-                    clear = [self._cookie_str(auth.STATE_COOKIE, "", path="/auth", max_age=0),
-                             self._cookie_str(auth.LINK_COOKIE, "", path="/auth", max_age=0),
-                             self._cookie_str(auth.CLAIM_COOKIE, "", path="/auth", max_age=0),
-                             self._cookie_str(auth.APP_COOKIE, "", path="/auth", max_age=0),
-                             self._cookie_str(auth.PKCE_COOKIE, "", path="/auth", max_age=0)]
+                    clear = self._oauth_cookies()
                     link_user = self._cookie(auth.LINK_COOKIE)
                     claim_tok = self._cookie(auth.CLAIM_COOKIE)
                     if link_user:
@@ -4314,10 +4330,8 @@ def make_handler(app):
                                 "/?claim=%s&claimerr=%s" % (
                                     urllib.parse.quote(claim_tok),
                                     urllib.parse.quote(str(e))), clear)
-                        token = auth.create_session(app.conn, uid, "link",
-                                                    ua=self._ua(), ip=self._ip())
-                        return self._redirect("/", clear + [self._cookie_str(
-                            auth.SESSION_COOKIE, token, max_age=auth.SESSION_TTL)])
+                        token = self._new_session(uid, "link")
+                        return self._redirect("/", clear + [self._session_cookie(token)])
                     uid, token = app.auth.login(pid, q.get("code", ""), redirect_uri,
                                                 ua=self._ua(), ip=self._ip(),
                                                 verifier=verifier)
@@ -4328,8 +4342,7 @@ def make_handler(app):
                         hand = auth.mint_app_handoff(app.conn, uid)
                         return self._redirect(
                             "/auth/app/done?token=" + urllib.parse.quote(hand), clear)
-                    return self._redirect("/", clear + [self._cookie_str(
-                        auth.SESSION_COOKIE, token, max_age=auth.SESSION_TTL)])
+                    return self._redirect("/", clear + [self._session_cookie(token)])
             except auth.AccountExistsError as e:
                 # The provider proved the mailbox, not the account. Do not drop
                 # them into it; hold the identity and ask for the account's own
@@ -4359,10 +4372,8 @@ def make_handler(app):
                 except auth.AuthError:
                     # expired or already spent: the honest next step is the door
                     return self._redirect("/?app=again")
-                tok = auth.create_session(app.conn, uid, "app",
-                                          ua=self._ua(), ip=self._ip())
-                return self._redirect("/", [self._cookie_str(
-                    auth.SESSION_COOKIE, tok, max_age=auth.SESSION_TTL)])
+                tok = self._new_session(uid, "app")
+                return self._redirect("/", [self._session_cookie(tok)])
             hand = "fireside://auth?token=" + urllib.parse.quote(token)
             page = (
                 "<!doctype html><meta charset=utf-8>"
@@ -4418,13 +4429,10 @@ def make_handler(app):
                                                body.get("password", ""))
                 except auth.AuthError as e:
                     return self._json(401, {"error": str(e)})
-                token = auth.create_session(app.conn, uid, "local",
-                                            ua=self._ua(), ip=self._ip())
+                token = self._new_session(uid, "local")
                 return self._json(200, {"ok": True, "user": uid,
                                         "admin": auth.is_admin(app.conn, uid)},
-                                  cookie=self._cookie_str(
-                                      auth.SESSION_COOKIE, token,
-                                      max_age=auth.SESSION_TTL))
+                                  cookie=self._session_cookie(token))
             # Proving ownership of an account a social login collided with.
             # Both are public by construction: the claim token IS the capability.
             if path == "/auth/claim" and self.command == "GET":
@@ -4453,12 +4461,9 @@ def make_handler(app):
                                               body.get("password", ""))
                 except auth.AuthError as e:
                     return self._json(401, {"error": str(e)})
-                token = auth.create_session(app.conn, uid, "link",
-                                            ua=self._ua(), ip=self._ip())
+                token = self._new_session(uid, "link")
                 return self._json(200, {"ok": True, "user": uid},
-                                  cookie=self._cookie_str(
-                                      auth.SESSION_COOKIE, token,
-                                      max_age=auth.SESSION_TTL))
+                                  cookie=self._session_cookie(token))
             # Forgot password: ask for an address, mail a one-time link. The
             # answer is the same whether or not an account matched - telling the
             # two apart would turn this door into "who has an account here?".
@@ -4495,12 +4500,9 @@ def make_handler(app):
                                               body.get("password", ""))
                 except auth.AuthError as e:
                     return self._json(401, {"error": str(e)})
-                token = auth.create_session(app.conn, uid, "reset",
-                                            ua=self._ua(), ip=self._ip())
+                token = self._new_session(uid, "reset")
                 return self._json(200, {"ok": True, "user": uid},
-                                  cookie=self._cookie_str(
-                                      auth.SESSION_COOKIE, token,
-                                      max_age=auth.SESSION_TTL))
+                                  cookie=self._session_cookie(token))
             # Stripe's server-to-server webhook. Public by necessity: Stripe
             # holds no session, so the signature is the authentication. It is
             # read raw here, before any JSON parse, because the signature is
