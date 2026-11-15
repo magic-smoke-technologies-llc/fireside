@@ -122,6 +122,30 @@ class TestDispatch(Base):
         code, _ = self.status(self.post, "/import", raw=b"{not json")
         self.assertEqual(code, 400)
 
+    def test_a_body_that_is_not_an_object_is_400_on_a_route_and_a_door(self):
+        for path in ("/import", "/auth/local/login", "/auth/forgot",
+                     "/auth/reset", "/auth/claim/confirm"):
+            code, _ = self.status(self.post, path, raw=b"[1, 2]")
+            self.assertEqual(code, 400, path)
+
+    def test_a_bad_content_length_is_400_not_a_dropped_connection(self):
+        for path in ("/import", "/auth/local/login", "/webhook/stripe"):
+            for value in ("abc", "-1"):
+                code, _ = self.status(self.post, path, raw=b"{}",
+                                      headers={"Content-Length": value})
+                self.assertEqual(code, 400, (path, value))
+
+    def test_an_oversize_body_is_413_before_it_is_read(self):
+        from host import app as appmod
+        small = (appmod.DOOR_MAX_BYTES, appmod.BODY_MAX_BYTES)
+        appmod.DOOR_MAX_BYTES, appmod.BODY_MAX_BYTES = 64, 256
+        self.addCleanup(lambda: setattr(appmod, "DOOR_MAX_BYTES", small[0]))
+        self.addCleanup(lambda: setattr(appmod, "BODY_MAX_BYTES", small[1]))
+        big = json.dumps({"pad": "x" * 1000}).encode()
+        for path in ("/import", "/auth/local/login", "/webhook/stripe"):
+            code, _ = self.status(self.post, path, raw=big)
+            self.assertEqual(code, 413, path)
+
     def test_a_handler_that_throws_is_500_with_the_reason(self):
         def boom(q, body):
             raise RuntimeError("kaboom")

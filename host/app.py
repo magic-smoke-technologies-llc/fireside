@@ -3993,6 +3993,13 @@ PUBLIC_ROUTES = {"/", "/index.html", "/i18n.js", "/favicon.ico", "/health", "/au
                  "/2fa",
                  "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
 
+# Largest request body a route will read. A story or a PDF arrives base64 in a
+# JSON body, so the general cap is generous; the doors that need no session
+# (sign-in, reset, webhooks) carry a few short fields and get a small one.
+BODY_MAX_BYTES = 96 * 1024 * 1024
+DOOR_MAX_BYTES = 1024 * 1024
+
+
 # What a half-session may still reach: the screen that finishes the factor,
 # and nothing else. Keyed by the factor it owes, because an admin who must
 # enrol and a user who must type a code need different doors.
@@ -4097,6 +4104,39 @@ def make_handler(app):
                 if authz.startswith("Bearer "):
                     tok = authz[7:]
             return tok
+
+        def _read_body(self, max_bytes):
+            """(raw, None), or (None, (status, message)) when the body is refused.
+
+            The length comes from the client, so it is checked before anything is
+            read: a bad or negative value is a 400 and an oversize one a 413,
+            instead of a thread blocked on rfile.read(-1) or a book-sized buffer
+            from someone who never signed in.
+            """
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if n < 0:
+                return None, (400, "bad Content-Length")
+            if n > max_bytes:
+                return None, (413, "request body too large")
+            return (self.rfile.read(n) if n else b""), None
+
+        def _read_json(self, max_bytes):
+            """(object, None), or (None, (status, message)). An empty body is {}."""
+            raw, err = self._read_body(max_bytes)
+            if err:
+                return None, err
+            if not raw:
+                return {}, None
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except ValueError:
+                return None, (400, "request body is not valid JSON")
+            if not isinstance(body, dict):
+                return None, (400, "request body must be a JSON object")
+            return body, None
 
         def _ua(self):
             return (self.headers.get("User-Agent") or "")[:400]
@@ -4266,11 +4306,9 @@ def make_handler(app):
                 # it claims, so changing the name buys nothing.
                 if not app.door_limiter.allow("auth:" + (self._ip() or "?")):
                     return self._json(429, {"error": "too many attempts"})
-                n = int(self.headers.get("Content-Length") or 0)
-                try:
-                    body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
-                except ValueError:
-                    return self.send_error(400)
+                body, err = self._read_json(DOOR_MAX_BYTES)
+                if err:
+                    return self._json(err[0], {"error": err[1]})
                 try:
                     if path.endswith("register"):
                         uid = auth.local_register(app.conn, body.get("username", ""),
@@ -4309,11 +4347,9 @@ def make_handler(app):
                     "has_password": m["has_password"],
                     "methods": methods})
             if path == "/auth/claim/confirm" and self.command == "POST":
-                n = int(self.headers.get("Content-Length") or 0)
-                try:
-                    body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
-                except ValueError:
-                    return self.send_error(400)
+                body, err = self._read_json(DOOR_MAX_BYTES)
+                if err:
+                    return self._json(err[0], {"error": err[1]})
                 try:
                     uid = auth.complete_claim(app.conn, body.get("claim", ""),
                                               body.get("password", ""))
@@ -4334,11 +4370,9 @@ def make_handler(app):
                 if not app.door_limiter.allow("forgot:" + (self._ip() or "?")):
                     return self._json(429, {"error": "too many attempts"})
                 from urllib.parse import quote
-                n = int(self.headers.get("Content-Length") or 0)
-                try:
-                    body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
-                except ValueError:
-                    return self.send_error(400)
+                body, err = self._read_json(DOOR_MAX_BYTES)
+                if err:
+                    return self._json(err[0], {"error": err[1]})
                 email = (body.get("email") or "").strip().lower()
                 res = auth.request_password_reset(app.conn, email)
                 if res:
@@ -4355,11 +4389,9 @@ def make_handler(app):
             # Consume the link: set a new password and sign in with it. The
             # token IS the capability, so no session is needed to reach this.
             if path == "/auth/reset" and self.command == "POST":
-                n = int(self.headers.get("Content-Length") or 0)
-                try:
-                    body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
-                except ValueError:
-                    return self.send_error(400)
+                body, err = self._read_json(DOOR_MAX_BYTES)
+                if err:
+                    return self._json(err[0], {"error": err[1]})
                 try:
                     uid = auth.reset_password(app.conn, body.get("token", ""),
                                               body.get("password", ""))
@@ -4376,8 +4408,9 @@ def make_handler(app):
             # read raw here, before any JSON parse, because the signature is
             # computed over the exact bytes. No session, no auth gate.
             if path.startswith("/webhook/") and self.command == "POST":
-                n = int(self.headers.get("Content-Length") or 0)
-                payload = self.rfile.read(n) if n else b""
+                payload, err = self._read_body(DOOR_MAX_BYTES)
+                if err:
+                    return self._json(err[0], {"error": err[1]})
                 pid = parts[1] if len(parts) > 1 else "stripe"
                 sig = signature_header(self.headers, pid)
                 status, body = app.payment_webhook(payload, sig, pid)
@@ -4388,12 +4421,9 @@ def make_handler(app):
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             body = {}
             if self.command == "POST":
-                n = int(self.headers.get("Content-Length") or 0)
-                if n:
-                    try:
-                        body = json.loads(self.rfile.read(n).decode("utf-8"))
-                    except ValueError:
-                        return self.send_error(400)
+                body, err = self._read_json(BODY_MAX_BYTES)
+                if err:
+                    return self._json(err[0], {"error": err[1]})
             # The session lookup sits outside the per-handler try on purpose: it
             # runs before routing, so it has no handler to hand an error to. But
             # an unguarded raise here closes the connection with no status and no
