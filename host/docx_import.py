@@ -27,6 +27,7 @@ import hashlib
 import io
 import re
 import zipfile
+from host import safezip
 import xml.etree.ElementTree as ET
 
 from host.junkrules import FLAG_RULES, is_toc_entry, norm as _norm, rules_for
@@ -90,7 +91,7 @@ def _fields(p) -> list[str]:
 
 def _part_text(data: bytes, name: str) -> list[str]:
     try:
-        raw = data and zipfile.ZipFile(io.BytesIO(data)).read(name)
+        raw = data and safezip.read(zipfile.ZipFile(io.BytesIO(data)), name)
     except (KeyError, zipfile.BadZipFile):
         return []
     try:
@@ -102,7 +103,7 @@ def _part_text(data: bytes, name: str) -> list[str]:
 
 def _core_meta(data: bytes) -> dict:
     try:
-        raw = zipfile.ZipFile(io.BytesIO(data)).read("docProps/core.xml")
+        raw = safezip.read(zipfile.ZipFile(io.BytesIO(data)), "docProps/core.xml")
         root = ET.fromstring(raw)
     except (KeyError, zipfile.BadZipFile, ET.ParseError):
         return {}
@@ -123,7 +124,7 @@ def extract(data: bytes) -> dict:
     Nothing is deleted. `flags` is advisory and points at block ids.
     """
     z = zipfile.ZipFile(io.BytesIO(data))
-    body = ET.fromstring(z.read("word/document.xml"))
+    body = ET.fromstring(safezip.read(z, "word/document.xml"))
 
     header_text = set()
     for name in z.namelist():
