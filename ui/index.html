@@ -1512,6 +1512,9 @@ gtag('consent', 'default', {ad_storage: 'denied', ad_user_data: 'denied',
       <span class="small" id="admcount"></span>
     </div>
     <div id="admlist"></div>
+    <h3 style="margin-top:34px" data-t="Recent admin actions">Recent admin actions</h3>
+    <p class="sub" data-t="Every change a staff account makes to a plan, a limit, or a balance is written down here, including the ones that were refused. This list is the record, not a summary of one.">Every change a staff account makes to a plan, a limit, or a balance is written down here, including the ones that were refused. This list is the record, not a summary of one.</p>
+    <div id="admaudit"></div>
     <h3 style="margin-top:34px" data-t="Server">Server</h3>
     <div class="admtoggle"><input type="checkbox" id="admregopen"><label for="admregopen" data-t="Open sign-ups">Open sign-ups</label></div>
     <p class="sub" style="margin-top:4px" data-t="Open means a stranger can make their own account on the buy page. Closed, only you can make accounts.">Open means a stranger can make their own account on the buy page. Closed, only you can make accounts.</p>
@@ -3061,7 +3064,43 @@ async function loadAdmin() {
   const boot = $('#admbootall'); if (boot) boot.onclick = bootEveryone;
   const filter = $('#admfilter'); if (filter) filter.oninput = drawAdmin;
   drawAdmin();
+  loadAudit();
   loadBillSetup();
+}
+
+/* The staff action log: what was done, to whom, by whom, and what it changed.
+   The subject line is written by the host as facts (before and after), not by
+   this page re-deriving them from the ledger. */
+async function loadAudit() {
+  const box = $('#admaudit'); if (!box) return;
+  let d;
+  try { d = await api('/admin/audit'); }
+  catch (e) { box.textContent = (e && e.message) || T('could not load the log'); return; }
+  box.textContent = '';
+  const rows = (d && d.entries) || [];
+  if (!rows.length) {
+    const p = document.createElement('p'); p.className = 'small';
+    p.textContent = T('Nothing has been changed yet.'); box.append(p); return;
+  }
+  rows.forEach(r => {
+    const row = document.createElement('div'); row.className = 'acctrow';
+    const t = document.createElement('span');
+    const amt = r.amount > 0 ? '+' + money(r.amount) : '-' + money(-r.amount);
+    const at = Date.parse(r.created_at);
+    t.textContent = [
+      isFinite(at) ? _agoUnix(Math.round(at / 1000)) : r.created_at,
+      T('{who} {verb} {amount} on {user}', {
+        who: r.actor_name || r.actor_id,
+        verb: r.amount > 0 ? T('added') : T('removed'),
+        amount: amt,
+        user: r.target }),
+      r.outcome === 'refused' ? T('refused: {why}', { why: r.reason })
+        : T('balance {from} to {to}', { from: money(r.before), to: money(r.after) }),
+      r.note ? T('reason: {why}', { why: r.note }) : '',
+    ].filter(Boolean).join(' \u00b7 ');
+    row.append(t);
+    box.append(row);
+  });
 }
 
 // --- admin: the payments setup -------------------------------------------
@@ -3450,7 +3489,7 @@ function fillAcct(body, a) {
     };
     row.append(inp, b3); danger.append(row);
   }
-  function reloadRow() { /* redraw the row in place, keep its open state */ drawAdmin(); }
+  function reloadRow() { /* redraw the row in place, keep its open state */ drawAdmin(); loadAudit(); }
 }
 
 function admNote(text) { const m = $('#admmsg'); if (m) m.textContent = text || ''; }

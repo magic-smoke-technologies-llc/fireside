@@ -182,5 +182,71 @@ class TestAdminAccounts(unittest.TestCase):
         self.assertEqual(self._row(out, "u_reader")["balance"], 7.0)
 
 
+    # ---- the audit trail ----------------------------------------------------
+    # Chris, 11-14: "make sure that action has an audit trail attached." The
+    # ledger says a balance moved. The audit says who moved it, whether it was
+    # applied or refused, and what the balance was on either side. A refused
+    # attempt is recorded too: the row an operator wants when a balance did NOT
+    # move and someone says they changed it.
+
+    def _audit(self, limit=20):
+        s, out = self.app.admin_audit({"_user": "u_boss", "limit": limit}, {})
+        self.assertEqual(s, 200)
+        return out["entries"]
+
+    def test_an_applied_change_leaves_actor_amount_and_both_balances(self):
+        self.app.admin_credit({"_user": "u_boss"},
+                              {"user": "u_reader", "amount": 5, "note": "apology"})
+        rows = self._audit()
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["actor_id"], "u_boss")
+        self.assertEqual(r["action"], "adjust")
+        self.assertEqual(r["target"], "u_reader")
+        self.assertEqual(r["amount"], 5.0)
+        self.assertEqual(r["before"], 0.0)
+        self.assertEqual(r["after"], 5.0)
+        self.assertEqual(r["outcome"], "applied")
+        self.assertEqual(r["note"], "apology")
+        self.assertTrue(r["created_at"])
+
+    def test_a_refused_change_is_recorded_as_refused(self):
+        self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": 5})
+        s, _ = self.app.admin_credit({"_user": "u_boss"},
+                                     {"user": "u_reader", "amount": -10})
+        self.assertEqual(s, 400)
+        rows = self._audit()
+        self.assertEqual(len(rows), 2, rows)
+        self.assertEqual(rows[0]["outcome"], "refused")
+        self.assertIn("below zero", rows[0]["reason"])
+        self.assertEqual(rows[0]["amount"], -10.0)
+        # the balance is untouched and the applied row still says what it did
+        self.assertEqual(rows[1]["outcome"], "applied")
+
+    def test_a_removal_is_recorded_with_its_sign(self):
+        self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": 5})
+        self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": -2})
+        r = self._audit()[0]
+        self.assertEqual(r["amount"], -2.0)
+        self.assertEqual((r["before"], r["after"]), (5.0, 3.0))
+
+    def test_the_audit_is_admin_only_and_newest_first(self):
+        s, out = self.app.admin_audit({"_user": "u_reader"}, {})
+        self.assertEqual(s, 403)
+        self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": 1})
+        self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": 2})
+        rows = self._audit()
+        self.assertEqual([r["amount"] for r in rows], [2.0, 1.0])
+
+    def test_an_audit_line_survives_a_later_deletion_of_the_account(self):
+        """A record that disappears with its subject is not a record."""
+        self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": 5})
+        self.app.admin_account_delete(
+            {"_user": "u_boss"}, {"user": "u_reader", "confirm": "alex"})
+        rows = self._audit()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["target"], "u_reader")
+
+
 if __name__ == "__main__":
     unittest.main()
