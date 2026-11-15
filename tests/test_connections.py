@@ -36,7 +36,10 @@ class Plugin:
     needs_key = True
     def settings(self):
         return [{"name": "key", "label": "Key", "kind": "password"},
-                {"name": "region", "label": "Region", "kind": "text", "default": "eastus"}]
+                {"name": "region", "label": "Region", "kind": "text", "default": "eastus"},
+                # declared and still readable, but the screen does not draw it
+                {"name": "markup", "label": "Markup", "kind": "text",
+                 "default": "1.25", "shown": False}]
     def list_voices(self, cred):
         return [{"id": "vv", "label": "Voice V"}]
     def synth(self, text, voice, opts, cred):

@@ -38,19 +38,26 @@ class Field:
     """One declarative settings widget. A provider ships no HTML; it declares
     the shape and the host draws the widget (docs/V2-ARCHITECTURE.md)."""
 
-    __slots__ = ("name", "label", "kind", "default", "choices", "help")
+    __slots__ = ("name", "label", "kind", "default", "choices", "help", "shown")
 
-    def __init__(self, name, label, kind="text", default=None, choices=None, help=""):
+    def __init__(self, name, label, kind="text", default=None, choices=None, help="",
+                 shown=True):
         self.name = name
         self.label = label
         self.kind = kind                # text | password | number | bool | choice
         self.default = default
         self.choices = list(choices) if choices else None
         self.help = help
+        # `shown` is whether the settings screen draws this field. A knob the
+        # provider keeps (and still reads) can be a deployment decision rather
+        # than a switch a person is supposed to flick; hiding it belongs in the
+        # field's own declaration, not in a name check inside the host.
+        self.shown = shown
 
     def dict(self):
         return {"name": self.name, "label": self.label, "kind": self.kind,
-                "default": self.default, "choices": self.choices, "help": self.help}
+                "default": self.default, "choices": self.choices, "help": self.help,
+                "shown": bool(self.shown)}
 
 
 class Audio:

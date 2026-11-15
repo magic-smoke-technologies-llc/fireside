@@ -216,7 +216,7 @@ CREATE TABLE IF NOT EXISTS admin_audit (
     id VARCHAR(64) PRIMARY KEY, actor_id VARCHAR(128) DEFAULT '',
     actor_name VARCHAR(255) DEFAULT '', action VARCHAR(64) DEFAULT '',
     target VARCHAR(128) DEFAULT '', amount DOUBLE DEFAULT 0,
-    before DOUBLE DEFAULT 0, after DOUBLE DEFAULT 0,
+    balance_before DOUBLE DEFAULT 0, balance_after DOUBLE DEFAULT 0,
     outcome VARCHAR(32) DEFAULT '', reason VARCHAR(255) DEFAULT '',
     note TEXT, created_at VARCHAR(32), ip VARCHAR(64) DEFAULT '');
 """

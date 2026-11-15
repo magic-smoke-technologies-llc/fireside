@@ -101,5 +101,27 @@ class TestSaleOffer(unittest.TestCase):
         self.assertEqual(seen["cred"], {"markup": "1.3"})
 
 
+class TestMarkupIsDeclaredNotDrawn(unittest.TestCase):
+    """The azure sale plugin keeps the markup knob but does not put it on the
+    settings screen (Chris, 11-14). It is our price, published in one table,
+    and a field that is hidden must still be declared so a deployment can set
+    it and the plugin can read it."""
+
+    def test_the_azure_plugin_declares_markup_and_hides_it(self):
+        import importlib.util
+        import os
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "plugins", "speech", "azure", "plugin.py")
+        spec = importlib.util.spec_from_file_location("azure_plugin", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        fields = {f.name: f.dict() for f in mod.Speech().settings()}
+        self.assertEqual(fields["markup"]["shown"], False)
+        self.assertTrue(fields["infra_per_1m"]["shown"])
+        # hidden is not removed: the price still comes from this number
+        self.assertAlmostEqual(mod.Speech().sale_rate_per_1m({"markup": "1.4"}),
+                               15.0 * 1.4)
+
+
 if __name__ == "__main__":
     unittest.main()

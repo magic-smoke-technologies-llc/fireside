@@ -667,6 +667,12 @@
   .admtools input{max-width:280px;margin:0}
   .admtools .small{margin-left:auto}
   .acct{border:1px solid var(--line);border-radius:12px;margin-top:10px;background:var(--surface);overflow:hidden}
+  /* The roster is a control: a fixed pane that scrolls on its own, with pages
+     the server hands out. The page around it stays put, so a long account body
+     never pushes the rest of the screen off the bottom. */
+  .admpager{display:flex;align-items:center;gap:8px;margin:12px 0 8px}
+  .admscroll{max-height:62vh;overflow-y:auto;overscroll-behavior:contain;
+    border:1px solid var(--line);border-radius:12px;padding:6px 10px}
   .accthead{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;
     padding:12px 16px;text-align:left;cursor:pointer;color:inherit;font:inherit}
   .accthead:hover{background:var(--raise,rgba(255,255,255,.03))}
@@ -1278,6 +1284,7 @@ gtag('consent', 'default', {ad_storage: 'denied', ad_user_data: 'denied',
       <button data-p="voice" data-t="Voice">Voice</button>
       <button data-p="reading" data-t="Reading">Reading</button>
       <button data-p="words" data-t="Words">Words</button>
+      <button data-p="party" data-t="3rd party">3rd party</button>
       <button data-p="account" data-t="Account">Account</button>
     </nav>
 
@@ -1367,11 +1374,6 @@ gtag('consent', 'default', {ad_storage: 'denied', ad_user_data: 'denied',
         <button class="btn quiet" id="loadvoices" type="button" data-t="Load voices">Load voices</button>
         <button class="btn" id="save" type="button" data-t="Save">Save</button>
       </div>
-      <div id="srcpanel" style="display:none">
-        <label data-t="Text sources">Text sources</label>
-        <p class="hint" style="margin-top:0" data-t="Each source asks for what it needs (AO3 asks for a cookie). These live on the server, never in this browser.">Each source asks for what it needs (AO3 asks for a cookie). These live on the server, never in this browser.</p>
-        <div id="sources"></div>
-      </div>
     </div>
 
     <div class="setpanel" data-p="reading">
@@ -1402,6 +1404,16 @@ gtag('consent', 'default', {ad_storage: 'denied', ad_user_data: 'denied',
       <div id="pronmsg" class="sub" style="margin-top:8px"></div>
     </div>
 
+    <!-- Credentials for the sites books come from are their own room now
+         (Chris, 11-14: "the AO3 settings should live in their own tab"). They
+         were a drawer under Voice, next to a speaker list they have nothing to
+         do with, and each one is a third party's login rather than a reading
+         preference. -->
+    <div class="setpanel" data-p="party">
+      <h3 style="margin-top:24px" data-t="Connected sources">Connected sources</h3>
+      <p class="sub" data-t="The sites a link can come from. Each source asks for what it needs (AO3 asks for a cookie). These live on the server, never in this browser, and they are used only to fetch the pages you paste.">The sites a link can come from. Each source asks for what it needs (AO3 asks for a cookie). These live on the server, never in this browser, and they are used only to fetch the pages you paste.</p>
+      <div id="sources"></div>
+    </div>
     <div class="setpanel" data-p="account">
       <h3 style="margin-top:24px" data-t="Language">Language</h3>
       <p class="sub" data-t="The app's own words. Books stay in the language they were written in.">The app's own words. Books stay in the language they were written in.</p>
@@ -1509,9 +1521,13 @@ gtag('consent', 'default', {ad_storage: 'denied', ad_user_data: 'denied',
     <p class="sub" data-t="Every account on this server. Open one to change its plan, lift a limit, boot its devices, or delete it.">Every account on this server. Open one to change its plan, lift a limit, boot its devices, or delete it.</p>
     <div class="admtools">
       <input id="admfilter" placeholder="filter by name" data-t-ph="filter by name" autocomplete="off" aria-label="Filter accounts" data-t-aria="Filter accounts">
-      <span class="small" id="admcount"></span>
     </div>
-    <div id="admlist"></div>
+    <div class="admpager">
+      <span class="small" id="admrange"></span>
+      <button class="btn quiet" id="admpageprev" type="button" data-t="Previous">Previous</button>
+      <button class="btn quiet" id="admpagenext" type="button" data-t="Next">Next</button>
+    </div>
+    <div class="admscroll"><div id="admlist"></div></div>
     <h3 style="margin-top:34px" data-t="Recent admin actions">Recent admin actions</h3>
     <p class="sub" data-t="Every change a staff account makes to a plan, a limit, or a balance is written down here, including the ones that were refused. This list is the record, not a summary of one.">Every change a staff account makes to a plan, a limit, or a balance is written down here, including the ones that were refused. This list is the record, not a summary of one.</p>
     <div id="admaudit"></div>
@@ -2393,30 +2409,34 @@ async function loadSources() {
   renderSources();
 }
 function renderSources() {
-  const panel = $('#srcpanel'), box = $('#sources');
-  if (!panel || !box) return;
-  if (!SOURCES.length) { panel.style.display = 'none'; return; }
-  panel.style.display = 'block'; box.innerHTML = '';
+  const box = $('#sources');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!SOURCES.length) {
+    const p = document.createElement('p'); p.className = 'small';
+    p.textContent = T('No source is asking for anything right now.');
+    box.append(p); return;
+  }
   SOURCES.forEach(s => {
     const wrap = document.createElement('div'); wrap.className = 'conncard';
     const h = document.createElement('div'); h.className = 'conntitle'; h.textContent = s.label || s.id; wrap.append(h);
-    (s.fields || []).forEach(f => {
+    (s.fields || []).filter(f => f.shown !== false).forEach(f => {
       const lab = document.createElement('label'); lab.textContent = f.label || f.name; wrap.append(lab);
       const inp = document.createElement('input');
       inp.type = f.sensitive ? 'password' : 'text';
       inp.dataset.src = s.id; inp.dataset.field = f.name;
-      inp.placeholder = f.placeholder || (f.sensitive ? (f.set ? '•••••• saved' : 'not set') : '');
+      inp.placeholder = f.placeholder || (f.sensitive ? (f.set ? '\u2022\u2022\u2022\u2022\u2022\u2022 saved' : 'not set') : '');
       wrap.append(inp);
       if (f.help) { const hh = document.createElement('div'); hh.className = 'hint'; hh.textContent = f.help; wrap.append(hh); }
     });
     const row = document.createElement('div'); row.className = 'connrow';
-    const sv = document.createElement('button'); sv.className = 'btn'; sv.type = 'button'; sv.textContent = 'Save';
-    sv.onclick = async () => { busy('Saving ' + (s.label || s.id) + '\u2026');
-      try { await jpost('/source-creds', { id: s.id, data: _srcInputs(s.id) }); await loadSources(); idle('Saved.'); } catch (e) { fail(e); } };
+    const sv = document.createElement('button'); sv.className = 'btn'; sv.type = 'button'; sv.textContent = T('Save');
+    sv.onclick = async () => { busy(T('Saving\u2026'));
+      try { await jpost('/source-creds', { id: s.id, data: _srcInputs(s.id) }); await loadSources(); idle(T('Saved.')); } catch (e) { fail(e); } };
     row.append(sv);
-    const cl = document.createElement('button'); cl.className = 'btn quiet'; cl.type = 'button'; cl.textContent = 'Clear';
-    cl.onclick = async () => { if (!confirm('Clear the stored ' + (s.label || s.id) + ' values?')) return;
-      try { await jpost('/source-creds/delete', { id: s.id }); await loadSources(); idle('Cleared.'); } catch (e) { fail(e); } };
+    const cl = document.createElement('button'); cl.className = 'btn quiet'; cl.type = 'button'; cl.textContent = T('Clear');
+    cl.onclick = async () => { if (!confirm(T('Clear the stored values for {source}?', { source: s.label || s.id }))) return;
+      try { await jpost('/source-creds/delete', { id: s.id }); await loadSources(); idle(T('Cleared.')); } catch (e) { fail(e); } };
     row.append(cl);
     wrap.append(row); box.append(wrap);
   });
@@ -2460,7 +2480,7 @@ function renderConns() {
       w.append(cb, document.createTextNode(' use for me')); head.append(w);
     }
     card.append(head);
-    (c.fields || []).forEach(f => {
+    (c.fields || []).filter(f => f.shown !== false).forEach(f => {
       const lab = document.createElement('label'); lab.textContent = f.label || f.name; card.append(lab);
       const inp = document.createElement('input'); inp.type = f.sensitive ? 'password' : 'text';
       inp.dataset.field = f.name; inp.dataset.conn = c.id;
@@ -2542,7 +2562,7 @@ function fillProviderSelect() { const sel = $('#cprovider');
   (plugins.speech || []).forEach(p => { const o = document.createElement('option'); o.value = p.id; o.textContent = p.label || p.id; sel.append(o); });
   sel.onchange = renderAddFields; }
 function renderAddFields() { const box = $('#cfields'); box.innerHTML = '';
-  providerFields($('#cprovider').value).forEach(f => {
+  providerFields($('#cprovider').value).filter(f => f.shown !== false).forEach(f => {
     const lab = document.createElement('label'); lab.textContent = f.label || f.name;
     const inp = document.createElement('input'); inp.type = f.kind === 'password' ? 'password' : 'text';
     inp.dataset.field = f.name; inp.placeholder = f.kind === 'password' ? '(secret)' : (f.default || '');
@@ -3047,11 +3067,19 @@ async function loadSessions() {
 const ADM_OPEN = new Set();     // rows left open, kept across a redraw
 let ADM_DATA = null, ADM_SESSIONS = [];
 
+// One page of the roster at a time. The page, the filter and the total all come
+// from the host: filtering here would only search the ten rows already drawn,
+// and a pager needs a number this screen does not hold.
+const ADM_PAGE = { offset: 0, limit: 10, filter: '' };
+let ADM_FILTER_T = null;
+
 async function loadAdmin() {
   const list = $('#admlist'); if (!list) return;
   list.textContent = T('Loading accounts\u2026');
   let d, ss;
-  try { d = await api('/admin/accounts'); }
+  const qs = '?offset=' + ADM_PAGE.offset + '&limit=' + ADM_PAGE.limit +
+    (ADM_PAGE.filter ? '&filter=' + encodeURIComponent(ADM_PAGE.filter) : '');
+  try { d = await api('/admin/accounts' + qs); }
   catch (e) {
     list.textContent = (e && e.message) || T('could not load the accounts');
     return;
@@ -3062,10 +3090,43 @@ async function loadAdmin() {
   const reg = $('#admregopen');
   if (reg) { reg.checked = d.registration_open !== false; reg.onchange = saveRegOpen; }
   const boot = $('#admbootall'); if (boot) boot.onclick = bootEveryone;
-  const filter = $('#admfilter'); if (filter) filter.oninput = drawAdmin;
+  const filter = $('#admfilter');
+  if (filter) {
+    filter.value = ADM_PAGE.filter;
+    filter.oninput = () => {
+      clearTimeout(ADM_FILTER_T);
+      ADM_FILTER_T = setTimeout(() => {
+        ADM_PAGE.filter = filter.value.trim();
+        ADM_PAGE.offset = 0;
+        loadAdmin();
+      }, 250);
+    };
+  }
+  const prev = $('#admpageprev'), next = $('#admpagenext');
+  if (prev) prev.onclick = () => { ADM_PAGE.offset = Math.max(0, ADM_PAGE.offset - ADM_PAGE.limit); loadAdmin(); };
+  if (next) next.onclick = () => { ADM_PAGE.offset += ADM_PAGE.limit; loadAdmin(); };
   drawAdmin();
+  drawPager();
   loadAudit();
   loadBillSetup();
+}
+
+function drawPager() {
+  const d = ADM_DATA || {};
+  const total = d.total || 0;
+  const off = d.offset || 0;
+  const lim = d.limit || ADM_PAGE.limit;
+  const range = $('#admrange');
+  if (range) {
+    range.textContent = total
+      ? T('{from}–{to} of {total}', { from: String(off + 1),
+                                      to: String(Math.min(off + lim, total)),
+                                      total: String(total) })
+      : T('No accounts match that filter.');
+  }
+  const prev = $('#admpageprev'), next = $('#admpagenext');
+  if (prev) prev.disabled = off <= 0;
+  if (next) next.disabled = (off + lim) >= total;
 }
 
 /* The staff action log: what was done, to whom, by whom, and what it changed.
@@ -3095,7 +3156,7 @@ async function loadAudit() {
         amount: amt,
         user: r.target }),
       r.outcome === 'refused' ? T('refused: {why}', { why: r.reason })
-        : T('balance {from} to {to}', { from: money(r.before), to: money(r.after) }),
+        : T('balance {from} to {to}', { from: money(r.balance_before), to: money(r.balance_after) }),
       r.note ? T('reason: {why}', { why: r.note }) : '',
     ].filter(Boolean).join(' \u00b7 ');
     row.append(t);
@@ -3282,18 +3343,14 @@ function billNote(text) { const m = $('#billmsg'); if (m) m.textContent = text |
 
 function drawAdmin() {
   const list = $('#admlist'); if (!list || !ADM_DATA) return;
-  const q = (($('#admfilter') || {}).value || '').trim().toLowerCase();
-  const all = ADM_DATA.accounts || [];
-  const rows = q ? all.filter(a => a.username.toLowerCase().includes(q) ||
-                                  a.user_id.toLowerCase().includes(q)) : all;
-  const count = $('#admcount');
-  if (count) count.textContent = q
-    ? T('{n} of {total}', { n: rows.length, total: all.length })
-    : T('{n} accounts', { n: all.length });
+  // The rows are already the page the host chose, and already filtered by it.
+  // Re-filtering here would only search the ten that happened to load.
+  const rows = ADM_DATA.accounts || [];
   list.innerHTML = '';
   if (!rows.length) {
     const p = document.createElement('p'); p.className = 'sub';
-    p.textContent = q ? T('No account matches that.') : T('No accounts yet.');
+    p.textContent = ADM_PAGE.filter ? T('No account matches that.')
+                                    : T('No accounts yet.');
     list.append(p); return;
   }
   rows.forEach(a => list.append(acctRow(a)));
