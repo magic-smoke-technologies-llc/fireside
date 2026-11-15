@@ -42,7 +42,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from host.host import Host
 import inspect
 
-from host import accounting, allowance, audit, auth, billing, connections, contracts, credentials, db, disambig, draft as drafts, erase, example, grants, i18n, jobs, keepwarm, library, mailer, notices, payments, playback, plans, pron, quota, ratelimit, reading, renderjob_runner, settings, stats, tags as tagmod
+from host import accounting, allowance, audit, auth, billing, connections, contracts, credentials, db, disambig, draft as drafts, erase, example, grants, i18n, jobs, keepwarm, library, mailer, netguard, notices, payments, playback, plans, pron, quota, ratelimit, reading, renderjob_runner, settings, stats, tags as tagmod
 from host.egress import fetch as _fetch
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1460,26 +1460,7 @@ class App:
         """True only for an http(s) URL whose host resolves to a public address.
         A cover URL is user input, so it must never reach this box's own
         network or a file on it."""
-        try:
-            p = urllib.parse.urlsplit(url)
-        except Exception:
-            return False
-        if p.scheme not in ("http", "https") or not p.hostname:
-            return False
-        try:
-            infos = socket.getaddrinfo(p.hostname, p.port or
-                                       (443 if p.scheme == "https" else 80))
-        except Exception:
-            return False
-        for info in infos:
-            try:
-                ip = ipaddress.ip_address(info[4][0])
-            except ValueError:
-                return False
-            if (ip.is_private or ip.is_loopback or ip.is_link_local
-                    or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-                return False
-        return True
+        return netguard.is_public_url(url)
 
     def _cover_from_url(self, url):
         if not self._url_allowed(url):
@@ -1487,7 +1468,7 @@ class App:
         try:
             req = urllib.request.Request(
                 url, headers={"User-Agent": "fireside/2 (cover fetch)"})
-            with urllib.request.urlopen(req, timeout=20) as r:
+            with netguard.opener().open(req, timeout=20) as r:
                 ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
                 data = r.read(self.COVER_MAX_BYTES + 1)
         except Exception:

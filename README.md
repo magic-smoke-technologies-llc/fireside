@@ -172,6 +172,10 @@ goes into the host above.
   JavaScript-only pages and login-gated pages do not. AO3 works through
   **Download > EPUB**, which happens in your own browser and so also handles
   login-gated works.
+- Story links and cover URLs are fetched from the public internet only: an
+  address on a private network (a LAN host, `127.0.0.1`, a cloud metadata
+  address), or a redirect into one, is refused. If you really do import from your
+  own network, set `FIRESIDE_ALLOW_PRIVATE_FETCH=1`.
 - The `local` engine caps at 4 minutes; it is a stand-in.
 
 ## Provenance
