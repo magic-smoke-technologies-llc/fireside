@@ -33,7 +33,7 @@ def record(conn, actor_id, actor_name, action, target="", amount=0.0,
     rid = "%020d-%s" % (int(time.time() * 1000000), uuid.uuid4().hex[:8])
     conn.execute(
         "INSERT INTO admin_audit(id,actor_id,actor_name,action,target,amount,"
-        "before,after,outcome,reason,note,created_at,ip)"
+        "balance_before,balance_after,outcome,reason,note,created_at,ip)"
         " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (rid, actor_id or "", actor_name or "", action or "", target or "",
          float(amount or 0.0), float(before or 0.0), float(after or 0.0),

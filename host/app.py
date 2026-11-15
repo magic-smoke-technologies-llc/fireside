@@ -2958,6 +2958,7 @@ class App:
             sensitive = self._sensitive(name, kind)
             fields.append({"name": name, "label": f.get("label") or name, "kind": kind,
                            "sensitive": sensitive, "set": val not in (None, ""),
+                           "shown": f.get("shown", True) is not False,
                            "value": "" if sensitive else (val or "")})
         return {"id": c["id"], "scope": c["scope"], "provider": c["provider"],
                 "label": c["label"], "mine": c["mine"], "system": c["system"],
@@ -3362,14 +3363,17 @@ class App:
         return 200, settings.check(self.conn)
 
     def admin_accounts(self, q, body):
-        """Admin: every account as one row, with the numbers that decide what to
-        do about it.
+        """Admin: one page of accounts as rows, with the numbers that decide what
+        to do about each one.
 
         The admin screen used to stack three separate lists (grants, plans,
-        sessions) and each one repeated every account, so a server with twelve
-        accounts drew thirty-six rows and the answer to "what is going on with
-        this person" was spread across three of them. One row per account is the
-        unit an admin actually thinks in.
+        sessions) that each repeated every account, then it became one long page
+        of accordions. Both showed everything at once, so a server with fifty
+        accounts was unreadable and every row paid for storage and stats whether
+        or not anyone looked at it. This is a control: `offset`/`limit` pick the
+        page, `filter` narrows the roster, and the expensive numbers are only
+        measured for the rows actually returned. `total` is what the pager needs
+        and is computed before any of that.
 
         Everything here is measured, per account: what the shelf holds, what has
         been voiced, how long it has been listened to, when it was last seen.
@@ -3378,25 +3382,60 @@ class App:
         uid = (q or {}).get("_user") or ""
         if not auth.is_admin(self.conn, uid):
             return 403, {"error": "admin only"}
-        subs = billing.list_all(self.conn)
-        all_grants = grants.list_all(self.conn)
+        q = q or {}
+        try:
+            limit = int(q.get("limit") or 10)
+        except (TypeError, ValueError):
+            limit = 10
+        try:
+            offset = int(q.get("offset") or 0)
+        except (TypeError, ValueError):
+            offset = 0
+        limit = max(1, min(limit, 100))
+        offset = max(0, offset)
+        want = (q.get("filter") or "").strip().lower()
+
         admins = {r["user_id"] for r in
                   self.conn.execute("SELECT user_id FROM admins")}
         named = {}
         for r in self.conn.execute("SELECT username,user_id FROM local_accounts"):
             named.setdefault(r["user_id"], r["username"])
+        # The roster first: cheap columns only, so the pager can be answered
+        # without paying for storage reads on accounts nobody is looking at.
+        base = []
+        for r in self.conn.execute("SELECT id,name,created_at FROM users"):
+            who = r["id"]
+            base.append({"user_id": who,
+                         "username": named.get(who) or r["name"] or who,
+                         "admin": who in admins,
+                         "created_at": r["created_at"]})
+        if want:
+            base = [b for b in base
+                    if want in (b["username"] or "").lower()
+                    or want in (b["user_id"] or "").lower()]
+        base.sort(key=lambda b: (not b["admin"], (b["username"] or "").lower()))
+        total = len(base)
+        page = base[offset:offset + limit]
+        if not page:
+            return 200, {"accounts": [], "you": uid, "total": total,
+                         "offset": offset, "limit": limit, "filter": want,
+                         "tiers": list(quota.TIERS),
+                         "registration_open": auth.registration_open(self.conn)}
+
+        subs = billing.list_all(self.conn)
+        all_grants = grants.list_all(self.conn)
         books = {}
         for r in self.conn.execute(
                 "SELECT user_id,COUNT(*) n FROM books GROUP BY user_id"):
             books[r["user_id"]] = int(r["n"] or 0)
         seen, sessions = {}, {}
-        for s in auth.list_all_sessions(self.conn, (q or {}).get("_token") or ""):
+        for s in auth.list_all_sessions(self.conn, q.get("_token") or ""):
             u = s["user"]
             sessions[u] = sessions.get(u, 0) + 1
             seen[u] = max(seen.get(u, 0), int(s.get("last_seen") or 0))
         rows = []
-        for r in self.conn.execute("SELECT id,name,created_at FROM users ORDER BY created_at"):
-            who = r["id"]
+        for b in page:
+            who = b["user_id"]
             sub = subs.get(who) or {}
             plan = sub.get("plan") or quota.FREE_PLAN
             blocks = billing.blocks(self.conn, who)
@@ -3408,9 +3447,9 @@ class App:
                 stor = 0
             rows.append({
                 "user_id": who,
-                "username": named.get(who) or r["name"] or who,
-                "admin": who in admins,
-                "created_at": int(r["created_at"] or 0) if str(r["created_at"] or "").isdigit() else 0,
+                "username": b["username"],
+                "admin": b["admin"],
+                "created_at": int(b["created_at"] or 0) if str(b["created_at"] or "").isdigit() else 0,
                 "plan": plan,
                 "plan_status": sub.get("status") or "",
                 "plan_provider": sub.get("provider") or "",
@@ -3428,8 +3467,8 @@ class App:
                 "sessions": sessions.get(who, 0),
                 "last_seen": seen.get(who, 0),
             })
-        rows.sort(key=lambda r: (not r["admin"], r["username"].lower()))
-        return 200, {"accounts": rows, "you": uid,
+        return 200, {"accounts": rows, "you": uid, "total": total,
+                     "offset": offset, "limit": limit, "filter": want,
                      "tiers": list(quota.TIERS),
                      "registration_open": auth.registration_open(self.conn)}
 

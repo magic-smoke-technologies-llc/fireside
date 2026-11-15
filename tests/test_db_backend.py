@@ -245,6 +245,62 @@ class Schema(unittest.TestCase):
             c.close()
 
 
+# Words MySQL will not accept as a bare column name. SQLite takes all of them,
+# so a schema that uses one boots on a laptop and kills every MySQL deployment:
+# that is exactly what `before` and `after` did on 11-15 (error 1064), taking the
+# live app down to a failed revision while the old one kept serving.
+MYSQL_RESERVED = {
+    "before", "after", "interval", "read", "write", "order", "group", "key",
+    "keys", "index", "table", "select", "from", "where", "join", "on", "as",
+    "desc", "asc", "limit", "offset", "group_concat", "rank", "system", "range",
+    "rows", "current_date", "current_time", "current_timestamp", "usage",
+    "signal", "condition", "check", "default", "values", "match",
+    "option", "all", "and", "or", "not",
+    "in", "is", "like", "replace", "insert", "update", "delete", "create",
+    "drop", "alter", "lock", "share", "lines", "load", "column", "columns",
+}
+
+
+class SchemaIsPortable(unittest.TestCase):
+    """Every column the schema declares has to be legal on both engines."""
+
+    def _columns(self):
+        out = {}
+        table = None
+        for line in db.SCHEMA.splitlines():
+            stripped = line.strip()
+            m = re.match(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(", stripped)
+            if m:
+                table = m.group(1)
+                out.setdefault(table, [])
+                continue
+            if not table or not stripped or stripped.startswith("--"):
+                continue
+            if stripped.startswith(")"):
+                table = None
+                continue
+            name = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\s+[A-Za-z]", stripped)
+            if name:
+                out[table].append(name.group(1))
+        return out
+
+    def test_no_column_is_a_mysql_reserved_word(self):
+        bad = []
+        for table, cols in self._columns().items():
+            for c in cols:
+                if c.lower() in MYSQL_RESERVED:
+                    bad.append("%s.%s" % (table, c))
+        assert not bad, "reserved word used as a column: %r" % (bad,)
+
+    def test_the_parser_sees_the_tables_it_is_checking(self):
+        """The positive control: a parser that found nothing would pass the
+        test above by inspecting an empty schema."""
+        cols = self._columns()
+        self.assertIn("ledger", cols)
+        self.assertIn("admin_audit", cols)
+        self.assertIn("balance_before", cols["admin_audit"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

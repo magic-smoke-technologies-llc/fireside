@@ -55,6 +55,34 @@ class TestShare(ConnBase):
         self.assertIn("error", r)
 
 
+    def test_the_markup_is_kept_and_not_drawn(self):
+        """Chris, 11-14: "on the page where we share the azure server, don't show
+        the markup. We will put that on a table on the site somewhere."
+
+        The knob stays settable and keeps its value: it is our price, published
+        in one table, not a switch an operator flicks while looking at a server
+        list. The field is still declared, so a deployment can set it."""
+        admin = self.browser(); self.signup(admin)
+        cid = self.post(admin, "/connections",
+                        {"provider": "fake", "label": "Shared",
+                         "data": {"key": "K", "region": "eastus",
+                                  "markup": "1.4"}})["id"]
+        c = next(x for x in self.get(admin, "/connections")["connections"]
+                 if x["id"] == cid)
+        by = {f["name"]: f for f in c["fields"]}
+        self.assertFalse(by["markup"]["shown"])
+        self.assertEqual(by["markup"]["value"], "1.4")
+        self.assertTrue(by["region"]["shown"])
+        self.assertTrue(by["key"]["shown"])
+        # a save that never mentions the markup leaves it alone
+        self.post(admin, "/connections", {"id": cid, "data": {"region": "westus2"}})
+        c = next(x for x in self.get(admin, "/connections")["connections"]
+                 if x["id"] == cid)
+        by = {f["name"]: f for f in c["fields"]}
+        self.assertEqual(by["markup"]["value"], "1.4")
+        self.assertEqual(by["region"]["value"], "westus2")
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

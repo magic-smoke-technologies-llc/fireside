@@ -51,9 +51,14 @@ class Speech(_Impl, AccountingMixin):
         # the sale connection uses the last two; on any other connection they are
         # inert. They are not sensitive: they are price knobs, not secrets.
         return list(_Impl.settings(self)) + [
+            # The markup is not a switch a reader-operator should be flicking on
+            # a settings screen: it is our price, and the price belongs in the
+            # one table we publish (Chris, 11-14). The field stays declared, so
+            # a deployment can still set it, and the plugin still reads it.
             Field("markup", "Resale markup", "number", default=DEFAULT_MARKUP,
                   help="Price multiple over provider + infra cost for resold "
-                       "characters. Only used on the designated sale connection."),
+                       "characters. Only used on the designated sale connection.",
+                  shown=False),
             Field("infra_per_1m", "Infra fee per 1M chars", "number",
                   default=DEFAULT_INFRA_PER_1M,
                   help="Per-1M-chars fee added before the markup. Only used on "

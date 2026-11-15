@@ -10,7 +10,7 @@ import os
 import tempfile
 import unittest
 
-from host import auth, billing, grants
+from host import auth, billing, grants, quota
 from host.app import App
 from tests.test_app import READER_BODY, STORAGE_BODY
 from tests.test_pluginhost import write_plugin
@@ -204,8 +204,8 @@ class TestAdminAccounts(unittest.TestCase):
         self.assertEqual(r["action"], "adjust")
         self.assertEqual(r["target"], "u_reader")
         self.assertEqual(r["amount"], 5.0)
-        self.assertEqual(r["before"], 0.0)
-        self.assertEqual(r["after"], 5.0)
+        self.assertEqual(r["balance_before"], 0.0)
+        self.assertEqual(r["balance_after"], 5.0)
         self.assertEqual(r["outcome"], "applied")
         self.assertEqual(r["note"], "apology")
         self.assertTrue(r["created_at"])
@@ -228,7 +228,7 @@ class TestAdminAccounts(unittest.TestCase):
         self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": -2})
         r = self._audit()[0]
         self.assertEqual(r["amount"], -2.0)
-        self.assertEqual((r["before"], r["after"]), (5.0, 3.0))
+        self.assertEqual((r["balance_before"], r["balance_after"]), (5.0, 3.0))
 
     def test_the_audit_is_admin_only_and_newest_first(self):
         s, out = self.app.admin_audit({"_user": "u_reader"}, {})
@@ -246,6 +246,84 @@ class TestAdminAccounts(unittest.TestCase):
         rows = self._audit()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["target"], "u_reader")
+
+
+    # ---- the roster is a control, not a long page ---------------------------
+    # Chris, 11-14: "change the accordion per user to be a true scrolling,
+    # paginated control." Paging is the server's: the pager needs a total, the
+    # filter has to search every account rather than the ones already loaded,
+    # and a page nobody asked for is not measured.
+
+    def _many(self, n=25):
+        for i in range(n):
+            self.conn.execute(
+                "INSERT INTO users(id,name,created_at) VALUES(?,?,?)",
+                ("u_bulk%02d" % i, "bulk%02d" % i, "2026-01-02T00:00:%02dZ" % i))
+        self.conn.commit()
+
+    def _page(self, **q):
+        q["_user"] = "u_boss"
+        s, out = self.app.admin_accounts(q, {})
+        self.assertEqual(s, 200)
+        return out
+
+    def test_a_page_is_ten_rows_with_a_total(self):
+        self._many()
+        out = self._page()
+        self.assertEqual(len(out["accounts"]), 10)
+        self.assertEqual(out["total"], 27)          # 25 + boss + reader
+        self.assertEqual(out["offset"], 0)
+        self.assertEqual(out["limit"], 10)
+
+    def test_the_next_page_does_not_repeat_or_skip(self):
+        self._many()
+        one = [r["user_id"] for r in self._page()["accounts"]]
+        two = [r["user_id"] for r in self._page(offset=10)["accounts"]]
+        self.assertEqual(len(set(one) & set(two)), 0)
+        self.assertEqual(len(two), 10)
+        # the admin sorts first, and the rest are alphabetical
+        self.assertEqual(one[0], "u_boss")
+        self.assertEqual(one[1], "u_reader")
+        self.assertEqual(one[2:], ["u_bulk%02d" % i for i in range(8)])
+
+    def test_the_last_page_is_short_and_past_the_end_is_empty(self):
+        self._many()
+        out = self._page(offset=20)
+        self.assertEqual(len(out["accounts"]), 7)
+        self.assertEqual(out["total"], 27)
+        out = self._page(offset=100)
+        self.assertEqual(out["accounts"], [])
+        self.assertEqual(out["total"], 27)
+
+    def test_the_filter_searches_every_account_and_reports_its_own_total(self):
+        self._many()
+        out = self._page(filter="bulk1")
+        names = [r["username"] for r in out["accounts"]]
+        self.assertEqual(out["total"], 10)          # bulk10..bulk19
+        self.assertEqual(len(names), 10)
+        self.assertTrue(all("bulk1" in n for n in names))
+        out = self._page(filter="BULK2", limit=3)
+        self.assertEqual(out["filter"], "bulk2")
+        self.assertEqual(out["total"], 5)           # bulk20..bulk24
+        self.assertEqual(len(out["accounts"]), 3)
+
+    def test_a_page_is_measured_only_for_its_own_rows(self):
+        """The point of paging is not the count on screen: it is that a page of
+        ten does not read storage and stats for the other forty."""
+        self._many()
+        calls = []
+        real = quota.usage
+
+        def counting(conn, storage, user_id):
+            calls.append(user_id)
+            return real(conn, storage, user_id)
+
+        quota.usage = counting
+        try:
+            self._page(limit=3)
+        finally:
+            quota.usage = real
+        self.assertEqual(len(calls), 3, calls)
 
 
 if __name__ == "__main__":
