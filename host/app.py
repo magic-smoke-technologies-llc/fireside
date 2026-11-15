@@ -3183,6 +3183,57 @@ class App:
                      if "credits_unlimited" in body else None))
         return 200, {"ok": True, "user": target, "grants": out}
 
+    # ---- balance adjustments (admin) ----------------------------------------
+    # Support and comps: a specific amount of credit on one account, added or
+    # taken back, with a name on the row. A plan comp and a limit grant already
+    # exist; this is the missing third thing, because neither of those puts a
+    # dollar on a balance and the screen had no route that did.
+
+    def admin_credit(self, q, body):
+        """Admin: add or remove credit on one account.
+
+        `amount` is signed: +5 adds five dollars, -5 takes five back. The
+        balance is read before and after and both values come back, so the
+        caller sees the number it produced instead of trusting the input.
+        """
+        uid = self._admin_only(q)
+        if not uid:
+            return 403, {"error": "admin only"}
+        body = body or {}
+        target = (body.get("user") or "").strip()
+        if not target:
+            return 400, {"error": "user required"}
+        row = self.conn.execute("SELECT id FROM users WHERE id=?", (target,)).fetchone()
+        if not row:
+            return 404, {"error": "no such user"}
+        try:
+            amount = float(body.get("amount"))
+        except (TypeError, ValueError):
+            return 400, {"error": "amount must be a number"}
+        if amount == 0:
+            return 400, {"error": "amount must not be zero"}
+        # A fat-fingered 500 instead of 5 is the one mistake this screen invites,
+        # so one entry is capped. Two entries are allowed and say so.
+        if abs(amount) > 1000:
+            return 400, {"error": "one entry may be at most 1000 "
+                                  "(do it in two entries if it is real)"}
+        amount = round(amount, 2)
+        reason = re.sub(r"\s+", " ", (body.get("note") or "")).strip()[:200]
+        who = self._account_name(uid)
+        note = "%s %s%s" % (("credit by %s" % who) if amount > 0
+                            else ("debit by %s" % who),
+                            ("%.2f" % amount),
+                            (": " + reason) if reason else "")
+        before = accounting.balance(self.conn, target)
+        try:
+            after = accounting.adjust(self.conn, target, amount, note=note)
+        except accounting.BelowZero as e:
+            return 400, {"error": "would take the balance below zero: %s" % e}
+        return 200, {"ok": True, "user": target, "amount": amount,
+                     "before": round(before, 2), "balance": round(after, 2),
+                     "currency": accounting.currency(self.conn, target) or "USD",
+                     "note": note}
+
     # ---- plans (admin) -------------------------------------------------------
     # An admin sets what tier an account is on without a payment. This is how a
     # comped account (family, a tester) gets the paid tier; usage and the
@@ -3350,6 +3401,8 @@ class App:
                 "allowance_bytes": quota.allowance_bytes(plan, blocks),
                 "storage_unlimited": bool(g.get("storage_unlimited")),
                 "credits_unlimited": bool(g.get("credits_unlimited")),
+                "balance": round(accounting.balance(self.conn, who), 2),
+                "currency": accounting.currency(self.conn, who) or "USD",
                 "books": books.get(who, 0),
                 "chars_voiced": int(use.get("chars_total") or 0),
                 "books_listened": int(use.get("books_listened") or 0),
@@ -3824,6 +3877,7 @@ POST_ROUTES = {
     "/credits/purchase": "credits_purchase",
     "/grants": "grants_set",
     "/admin/plan": "plans_admin_set",
+    "/admin/credit": "admin_credit",
     "/admin/account/delete": "admin_account_delete",
     "/admin/billing": "admin_billing_save",
     "/admin/billing/check": "admin_billing_check",

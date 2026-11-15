@@ -89,8 +89,8 @@ class TestWalletActivity(BrowserTest):
         self.assertFalse(self.page.is_visible("#v-set .wsub[data-w='activity']"))
         self.assertTrue(self.page.is_visible("#wtopup"))
         tabs = self.page.inner_text("#wsubtabs")
-        self.assertIn("Add money", tabs)
-        self.assertIn("Wallet activity", tabs)
+        self.assertIn("Add credit", tabs)
+        self.assertIn("Credit activity", tabs)
 
         self.page.click("#wsubtabs button[data-w='activity']")
         wait_visible(self.page, "#v-set .wsub[data-w='activity']")
@@ -131,7 +131,7 @@ class TestWalletActivity(BrowserTest):
 
         # and the list is a named tab, not a mystery block under the buttons
         page_text = self.page.inner_text("#wsubtabs")
-        self.assertIn("Wallet activity", page_text)
+        self.assertIn("Credit activity", page_text)
 
     def test_the_grant_keeps_its_date_once_the_period_end_is_real(self):
         """The honest case still names a period, and the date is not a number.

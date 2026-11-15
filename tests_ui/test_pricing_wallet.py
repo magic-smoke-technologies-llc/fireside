@@ -83,7 +83,7 @@ class TestWalletPromiseIsVisible(BrowserTest):
         wait_visible(self.page, "#walletpromise")
         text = self.page.text_content("#walletpromise")
         self.assertIn("never expire", text)
-        self.assertIn("pay for services on the platform", text)
+        self.assertIn("used only for narration on this service", text)
         self.assertIn("provider", text)
 
 
