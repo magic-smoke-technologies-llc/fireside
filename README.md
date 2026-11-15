@@ -176,6 +176,11 @@ goes into the host above.
   address on a private network (a LAN host, `127.0.0.1`, a cloud metadata
   address), or a redirect into one, is refused. If you really do import from your
   own network, set `FIRESIDE_ALLOW_PRIVATE_FETCH=1`.
+- Behind a reverse proxy every request arrives from the proxy's address, so the
+  sign-in rate limit would be one shared budget. Set
+  `FIRESIDE_TRUSTED_PROXY_HOPS=<n>`, the number of proxies in front that append to
+  `X-Forwarded-For`, and the caller's address is read from the right of that
+  header. Unset (the default) it is the socket address, which a client cannot forge.
 - The `local` engine caps at 4 minutes; it is a stand-in.
 
 ## Provenance

@@ -168,6 +168,28 @@ class TestDispatch(Base):
                     self.assertEqual(code, want, (path, exc))
                     self.assertIn(text, json.loads(r.read())["error"])
 
+    def test_the_caller_address_honours_trusted_proxy_hops_from_the_right(self):
+        from unittest import mock
+        from host.app import make_handler
+        h = make_handler(self.app)
+        h.headers = {}
+        h.client_address = ("10.0.0.9", 1234)
+
+        def ip(hops, xff):
+            h.headers = {"X-Forwarded-For": xff} if xff else {}
+            env = {"FIRESIDE_TRUSTED_PROXY_HOPS": hops} if hops is not None else {}
+            with mock.patch.dict(os.environ, env):
+                return h._ip(h)
+
+        # no setting: the socket peer, and a forged header buys nothing
+        self.assertEqual(ip(None, "6.6.6.6"), "10.0.0.9")
+        # one proxy appended the real caller last; the client's own claim is left of it
+        self.assertEqual(ip("1", "6.6.6.6, 203.0.113.7"), "203.0.113.7")
+        self.assertEqual(ip("2", "6.6.6.6, 203.0.113.7, 10.1.1.1"), "203.0.113.7")
+        # fewer entries than hops: do not guess, use the peer
+        self.assertEqual(ip("3", "203.0.113.7"), "10.0.0.9")
+        self.assertEqual(ip("x", "203.0.113.7"), "10.0.0.9")
+
     def test_a_handler_that_throws_is_500_and_leaks_nothing_but_a_reference(self):
         import contextlib
         import io

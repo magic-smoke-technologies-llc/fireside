@@ -4112,6 +4112,13 @@ def _stale_claim(stamp):
     return (time.time() - when) > _PASS_CLAIM_SECONDS
 
 
+def _int_env(name, default):
+    try:
+        return max(0, int(os.environ.get(name, "")))
+    except ValueError:
+        return default
+
+
 def _truthy(v):
     return str(v or "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -4218,9 +4225,24 @@ def make_handler(app):
             return (self.headers.get("User-Agent") or "")[:400]
 
         def _ip(self):
-            # behind the tunnel the peer address is the proxy; trust only the
-            # socket peer, and say so plainly rather than trust an XFF header.
-            return (self.client_address[0] if self.client_address else "")[:64]
+            """The caller's address, for rate limits and the session list.
+
+            Default: the socket peer, which a client cannot forge. Behind a proxy
+            that is the proxy for everyone, so every caller would share one
+            sign-in budget. FIRESIDE_TRUSTED_PROXY_HOPS=N says N proxies of ours
+            append to X-Forwarded-For; the Nth entry from the right is then the
+            address our outermost proxy saw. Counting from the right matters: the
+            left of the header is whatever the client chose to send.
+            """
+            peer = (self.client_address[0] if self.client_address else "")
+            hops = _int_env("FIRESIDE_TRUSTED_PROXY_HOPS", 0)
+            if hops > 0:
+                chain = [p.strip() for p in
+                         (self.headers.get("X-Forwarded-For") or "").split(",")
+                         if p.strip()]
+                if len(chain) >= hops:
+                    return chain[-hops][:64]
+            return peer[:64]
 
         def _auth_route(self, parts, parsed):
             from urllib.parse import parse_qs
