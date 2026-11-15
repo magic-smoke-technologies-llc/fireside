@@ -3279,6 +3279,7 @@ function acctRow(a) {
     a.plan || T('no plan'),
     a.books === 1 ? T('{n} book', { n: '1' }) : T('{n} books', { n: nchar(a.books) }),
     a.listen_seconds ? T('{t} listened', { t: hms(a.listen_seconds) }) : T('not listened yet'),
+    T('{amount} credit', { amount: money(a.balance || 0) }),
     a.last_seen ? T('last seen {when}', { when: _agoUnix(a.last_seen) }) : T('never signed in'),
   ].join(' \u00b7 ');
   head.append(meta);
@@ -3341,6 +3342,38 @@ function fillAcct(body, a) {
     const p = document.createElement('span'); p.className = 'small';
     p.textContent = T('set by {who}', { who: a.plan_provider }); plan.append(p);
   }
+
+  const cred = sec(T('Balance'));
+  const bt = document.createElement('p'); bt.className = 'small'; bt.style.margin = '0';
+  bt.textContent = T('Now on the balance: {amount}', { amount: money(a.balance || 0) });
+  cred.append(bt);
+  const crow = document.createElement('div'); crow.className = 'acctrow';
+  const amt = document.createElement('input'); amt.type = 'number'; amt.step = '0.01';
+  amt.min = '0'; amt.style.maxWidth = '110px'; amt.placeholder = T('amount');
+  const why = document.createElement('input'); why.type = 'text'; why.autocomplete = 'off';
+  why.style.maxWidth = '220px'; why.placeholder = T('reason (shown on their history)');
+  const addC = document.createElement('button'); addC.type = 'button'; addC.className = 'btn quiet';
+  addC.textContent = T('Add credit');
+  const subC = document.createElement('button'); subC.type = 'button'; subC.className = 'btn quiet';
+  subC.textContent = T('Remove credit');
+  const move = async (sign) => {
+    const v = Math.abs(Number(amt.value));
+    if (!v || !isFinite(v)) { admNote(T('Type an amount first.')); return; }
+    addC.disabled = subC.disabled = true;
+    try {
+      const d = await jpost('/admin/credit', { user: a.user_id, amount: sign * v, note: why.value });
+      admNote(sign > 0
+        ? T('Added {amount} to {user}. Balance is now {now}.', { amount: money(d.amount), user: a.username, now: money(d.balance) })
+        : T('Removed {amount} from {user}. Balance is now {now}.', { amount: money(-d.amount), user: a.username, now: money(d.balance) }));
+      a.balance = d.balance; reloadRow();
+    } catch (e) {
+      addC.disabled = subC.disabled = false;
+      admNote(e.message || T('could not change the balance'));
+    }
+  };
+  addC.onclick = () => move(1);
+  subC.onclick = () => move(-1);
+  crow.append(amt, why, addC, subC); cred.append(crow);
 
   const lim = sec(T('Limits'));
   const toggles = document.createElement('div'); toggles.className = 'acctrow';
@@ -3450,7 +3483,7 @@ async function bootEveryone() {
 // /credits/history is the ledger itself, so an absorbed overage shows up here
 // as a row with estimate against final instead of hiding in a support log.
 const WKIND = { topup: 'Money added', charge: 'Narration', release: 'Hold released',
-                refund: 'Refund', grant: 'Included with your plan',
+                refund: 'Refund', adjust: 'Adjustment', grant: 'Included with your plan',
                 welcome: 'Welcome credit' };
 const TOPUPS = [5, 10, 25, 50];
 let WUNIT = 'USD';
@@ -3613,6 +3646,7 @@ function wtag(kind) {
     case 'charge': return T('Spent');
     case 'release': return T('Hold');
     case 'refund': return T('Refund');
+    case 'adjust': return T('Support');
     case 'grant':
     case 'welcome': return T('Plan');
     default: return T('Change');
@@ -3631,6 +3665,10 @@ function wtitle(r) {
   const kind = r.kind || '';
   if (kind === 'grant') return T('Included with your plan');
   if (kind === 'welcome') return T('Welcome credit');
+  if (kind === 'adjust') {
+    return (r.delta || 0) < 0 ? T('Credit removed by support')
+                              : T('Credit added by support');
+  }
   if (kind === 'charge') {
     return woverage(r) ? T('Narration, over the estimate we held') : T('Narration');
   }

@@ -95,6 +95,35 @@ def topup(conn, user_id, amount, currency="USD", note="", entry_id=""):
     return balance(conn, user_id)
 
 
+class BelowZero(Exception):
+    """An adjustment would take the balance under zero."""
+
+
+def adjust(conn, user_id, amount, note="", who=""):
+    """Add or remove credit by hand, for support and comps.
+
+    Signed like the ledger: +5.00 adds, -5.00 removes. A removal that would
+    take the balance below zero is refused, not clamped and not allowed: a
+    negative balance is the signature of an absorbed overage, and an admin
+    debit is not one. The row says who did it and why, so a balance that moved
+    without a card payment always has a name on it.
+    """
+    amount = float(amount)
+    if amount == 0:
+        raise ValueError("amount must not be zero")
+    cur = currency(conn, user_id) or "USD"
+    held = balance(conn, user_id)
+    if held + amount < 0:
+        raise BelowZero("balance %.2f, cannot remove %.2f" % (held, abs(amount)))
+    conn.execute("INSERT OR IGNORE INTO balances(user_id,currency,amount) VALUES(?,?,0)",
+                 (user_id, cur))
+    conn.execute("UPDATE balances SET amount=amount+? WHERE user_id=?",
+                 (amount, user_id))
+    _entry(conn, user_id, "adjust", amount, cur, None, None, note)
+    conn.commit()
+    return balance(conn, user_id)
+
+
 def reserve(conn, user_id, amount, currency="USD", job_id=None, note=""):
     """Atomically hold `amount`. Raises Insufficient rather than overdrawing."""
     amount = float(amount)

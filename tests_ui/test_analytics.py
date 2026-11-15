@@ -5,9 +5,9 @@ behaviour the promise rests on.
 
   * with no id configured, the account panel offers nothing and nothing is
     requested;
-  * with an id, the tag loads for everyone (that is how the visitors who never
-    sign up get counted) and the box is off, so the request that goes out is the
-    cookieless one;
+  * with an id but no consent, no tag is requested at all (the 11-14 GDPR
+    pass: a cookieless ping still leaves the browser), and the box is offered;
+  * once the reader opts in, the tag loads and the grant is granted;
   * turning the box on grants consent, turning it off revokes it, and the choice
     survives a reload because it is the reader's, not the session's.
 
@@ -39,19 +39,36 @@ class TestWithId(BrowserTest):
         self.page.route("**://www.googletagmanager.com/**",
                         lambda route: route.abort())
 
-    def test_the_tag_loads_for_a_visitor_who_never_signs_in(self):
+    def test_no_tag_loads_for_a_visitor_who_never_opts_in(self):
+        """The negative case, and it has to stay negative: a visitor who never
+        ticked the box gets no gtag.js request at all."""
         self._block_google()
         self.open_site()
         self.wait_door_rendered()
+        self.assertFalse(self.page.evaluate("() => !!window.__fsGa"))
+        asked = [u for (_s, u) in self.refused if "googletagmanager" in u]
+        self.assertEqual(asked, [])
+
+    def test_opting_in_loads_the_tag_and_grants_it(self):
+        """The positive control for the test above: with consent, the same
+        deployment does load the tag and does grant storage, so 'nothing was
+        requested' cannot pass by the tag simply being broken."""
+        self._block_google()
+        self.open_site()
+        self.wait_door_rendered()
+        self.page.evaluate("() => localStorage.setItem('fs.analytics', '1')")
+        self.page.reload()
+        self.wait_door_rendered()
         wait_until(self.page, "() => !!window.__fsGa")
-        # the consent default is on the page before the loader ran
-        self.assertEqual(self.page.evaluate(
-            "() => window.dataLayer.some(a => a[0] === 'consent' && a[1] === 'default')"),
-            True)
-        # and the grant was never sent, so it is cookieless
-        self.assertEqual(self.page.evaluate(
-            "() => window.dataLayer.some(a => a[0] === 'consent' && a[1] === 'update')"),
-            False)
+        wait_until(self.page, "() => window.dataLayer.some(a => a[0] === 'consent'"
+                              " && a[1] === 'update'"
+                              " && a[2].analytics_storage === 'granted')")
+        # the aborted request never reaches `refused` (no response exists), so
+        # the receipt is the injected script tag itself
+        self.assertTrue(self.page.evaluate(
+            "() => [...document.querySelectorAll('script')]"
+            ".some(s => (s.src || '').includes('googletagmanager'))"),
+            "the opt-in has to actually inject the tag")
 
     def test_the_box_is_off_by_default_and_grants_when_ticked(self):
         self._block_google()

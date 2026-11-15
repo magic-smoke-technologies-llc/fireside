@@ -131,5 +131,56 @@ class TestAdminAccounts(unittest.TestCase):
         self.assertEqual(s, 403)
 
 
+    # ---- balance adjustments ------------------------------------------------
+    # Chris, 11-14: "give me a UI where I can add/remove funds from a user's
+    # balance." The routes are the half a test can hold: the balance moves by
+    # exactly the amount sent, the ledger row carries the admin's name, a
+    # removal cannot dig past zero, and no stranger can move money at all.
+
+    def test_credit_adds_and_the_ledger_names_who_did_it(self):
+        s, out = self.app.admin_credit(
+            {"_user": "u_boss"}, {"user": "u_reader", "amount": 5, "note": "apology"})
+        self.assertEqual(s, 200)
+        self.assertEqual(out["balance"], 5.0)
+        self.assertEqual(out["before"], 0.0)
+        row = self.conn.execute(
+            "SELECT kind,delta,note FROM ledger WHERE user_id=? ORDER BY created_at",
+            ("u_reader",)).fetchone()
+        self.assertEqual(row["kind"], "adjust")
+        self.assertEqual(row["delta"], 5.0)
+        self.assertIn("u_boss", row["note"])
+        self.assertIn("apology", row["note"])
+
+    def test_credit_removes_and_refuses_to_dig_past_zero(self):
+        self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": 5})
+        s, out = self.app.admin_credit(
+            {"_user": "u_boss"}, {"user": "u_reader", "amount": -2.5})
+        self.assertEqual(s, 200)
+        self.assertEqual(out["balance"], 2.5)
+        s, out = self.app.admin_credit(
+            {"_user": "u_boss"}, {"user": "u_reader", "amount": -10})
+        self.assertEqual(s, 400)
+        self.assertIn("below zero", out["error"])
+        from host import accounting
+        self.assertEqual(accounting.balance(self.conn, "u_reader"), 2.5)
+
+    def test_credit_rejects_junk_and_strangers(self):
+        s, _ = self.app.admin_credit({"_user": "u_reader"}, {"user": "u_reader", "amount": 5})
+        self.assertEqual(s, 403)
+        s, out = self.app.admin_credit({"_user": "u_boss"}, {"user": "u_ghost", "amount": 5})
+        self.assertEqual(s, 404)
+        s, out = self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": 0})
+        self.assertEqual(s, 400)
+        s, out = self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": "abc"})
+        self.assertEqual(s, 400)
+        s, out = self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": 5000})
+        self.assertEqual(s, 400)
+
+    def test_the_row_shows_the_balance_it_will_change(self):
+        self.app.admin_credit({"_user": "u_boss"}, {"user": "u_reader", "amount": 7})
+        _, out = self.app.admin_accounts({"_user": "u_boss"}, {})
+        self.assertEqual(self._row(out, "u_reader")["balance"], 7.0)
+
+
 if __name__ == "__main__":
     unittest.main()
