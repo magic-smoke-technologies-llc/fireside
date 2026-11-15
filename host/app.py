@@ -312,24 +312,51 @@ class App:
         One row per provider object, so a webhook retry and the browser's own
         confirm can both land and the characters are credited once. Portable
         across the two engines: a select then an insert, no upsert clause.
+
+        Only a duplicate key means "already applied". Any other failure (a
+        dropped connection, a full disk) raises, so a webhook answers 500 and
+        the provider retries; reporting it as "already credited" would tell the
+        provider to stop and leave a paying customer with no balance.
         """
         event_id = (event_id or "").strip()
         if not event_id:
             return False
-        for _ in range(2):
-            if self.conn.execute("SELECT 1 FROM payment_events WHERE id=?",
-                                 (event_id,)).fetchone():
-                return False
+        if self.conn.execute("SELECT 1 FROM payment_events WHERE id=?",
+                             (event_id,)).fetchone():
+            return False
+        try:
+            self.conn.execute(
+                "INSERT INTO payment_events (id, kind, user_id, reference, "
+                "chars, detail, created_at) VALUES (?,?,?,?,?,?,?)",
+                (event_id, kind, uid, reference, int(chars or 0),
+                 detail or "", db.now()))
+        except Exception as e:
+            if db.is_duplicate(e):
+                return False          # another thread claimed it between the two
+            raise
+        return True
+
+    def _credit_once(self, event_id, kind, uid, reference, chars, detail, credit):
+        """Claim a provider event and run `credit()` for it, once.
+
+        True when this call did the crediting. If `credit` fails the claim is
+        released before the error goes on, so the retry is not told "already
+        credited" for money that never landed.
+        """
+        if not self._claim_payment(event_id, kind, uid, reference, chars, detail):
+            return False
+        if credit is not None:
             try:
-                self.conn.execute(
-                    "INSERT INTO payment_events (id, kind, user_id, reference, "
-                    "chars, detail, created_at) VALUES (?,?,?,?,?,?,?)",
-                    (event_id, kind, uid, reference, int(chars or 0),
-                     detail or "", db.now()))
-                return True
+                credit()
             except Exception:
-                continue
-        return False
+                try:
+                    self.conn.execute("DELETE FROM payment_events WHERE id=?",
+                                      (event_id.strip(),))
+                    self.conn.commit()
+                except Exception:
+                    pass        # keep the original failure, not this one
+                raise
+        return True
 
     @property
     def storage(self):
@@ -2070,14 +2097,20 @@ class App:
                              idem=idem)
         if not receipt.ok:
             return 402, {"error": "payment refused", "detail": receipt.detail}
-        if not self._claim_payment(receipt.reference, "characters", uid,
-                                   receipt.reference, chars, "direct charge"):
+        credited = {}
+
+        def credit():
+            credited["total"] = accounting.topup(
+                self.conn, uid, chars, currency="chars",
+                note="purchase %.2f USD -> %d chars (%s)"
+                     % (usd, chars, receipt.reference))
+        if not self._credit_once(receipt.reference, "characters", uid,
+                                 receipt.reference, chars, "direct charge",
+                                 credit):
             return 409, {"error": "this payment was already credited",
                          "reference": receipt.reference,
                          "balance": accounting.balance(self.conn, uid)}
-        total = accounting.topup(self.conn, uid, chars, currency="chars",
-                                 note="purchase %.2f USD -> %d chars (%s)"
-                                      % (usd, chars, receipt.reference))
+        total = credited["total"]
         payload = {"ok": True, "chars": chars, "balance": total,
                    "reference": receipt.reference}
         self._idem_put(uid, idem, 200, payload)
@@ -2104,11 +2137,13 @@ class App:
             return 402, {"error": "not confirmed", "detail": getattr(p, "detail", "")}
         if getattr(p, "user", "") != uid:
             return 403, {"error": "that purchase belongs to another account"}
-        fresh = self._claim_payment(p.reference, "characters", uid, p.reference,
-                                    p.chars, "checkout confirmed")
-        if fresh and p.chars:
-            accounting.topup(self.conn, uid, p.chars, currency="chars",
-                             note="purchase %d chars (%s)" % (p.chars, p.reference))
+        fresh = self._credit_once(
+            p.reference, "characters", uid, p.reference, p.chars,
+            "checkout confirmed",
+            (lambda: accounting.topup(
+                self.conn, uid, p.chars, currency="chars",
+                note="purchase %d chars (%s)" % (p.chars, p.reference)))
+            if p.chars else None)
         return 200, {"ok": True, "chars": p.chars, "credited": fresh,
                      "balance": accounting.balance(self.conn, uid),
                      "reference": p.reference}
@@ -2604,12 +2639,12 @@ class App:
             uid = (c or {}).get("user_id") or ""
         if not uid:
             return {"credited": False, "detail": "transaction names no account"}
-        if not self._claim_payment(tid, "wallet", uid, tid, cents,
-                                   "paddle transaction"):
-            return {"credited": False, "detail": "already credited", "user": uid}
         usd = cents / 100.0
-        accounting.topup(self.conn, uid, usd, currency="USD",
-                         note="wallet +$%.2f (%s)" % (usd, tid))
+        if not self._credit_once(
+                tid, "wallet", uid, tid, cents, "paddle transaction",
+                lambda: accounting.topup(self.conn, uid, usd, currency="USD",
+                                         note="wallet +$%.2f (%s)" % (usd, tid))):
+            return {"credited": False, "detail": "already credited", "user": uid}
         return {"credited": True, "user": uid, "usd": usd}
 
     def payment_webhook(self, raw, sig_header, provider_id="stripe"):
@@ -2659,11 +2694,13 @@ class App:
             if not getattr(p, "ok", False):
                 return 200, {"ok": True, "reference": ref, "applied": False,
                              "detail": getattr(p, "detail", "")}
-            fresh = self._claim_payment(p.reference, "characters", p.user,
-                                        p.reference, p.chars, "webhook")
-            if fresh and p.chars and p.user:
-                accounting.topup(self.conn, p.user, p.chars, currency="chars",
-                                 note="purchase %d chars (%s)" % (p.chars, p.reference))
+            fresh = self._credit_once(
+                p.reference, "characters", p.user, p.reference, p.chars,
+                "webhook",
+                (lambda: accounting.topup(
+                    self.conn, p.user, p.chars, currency="chars",
+                    note="purchase %d chars (%s)" % (p.chars, p.reference)))
+                if p.chars and p.user else None)
             return 200, {"ok": True, "reference": ref, "applied": fresh,
                          "user": p.user, "chars": p.chars}
         if not ref:

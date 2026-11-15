@@ -466,6 +466,16 @@ def migrate(conn):
     return conn
 
 
+def is_duplicate(exc):
+    """True when `exc` is a unique-key collision, on either engine.
+
+    sqlite3 and pymysql each have their own IntegrityError, and this module
+    must not import the one it is not running. Name-matching along the MRO
+    covers both (and pymysql's subclasses of it).
+    """
+    return any(c.__name__ == "IntegrityError" for c in type(exc).__mro__)
+
+
 def connect(path=None):
     """Open the configured backend. `path` is the SQLite file (default dir)."""
     if db_type() == "mysql":
