@@ -232,15 +232,19 @@ class TestCovers(Base):
             def __exit__(self, *a):
                 return False
 
-        saved_urlopen, saved_allow = appmod.urllib.request.urlopen, self.app._url_allowed
-        appmod.urllib.request.urlopen = lambda req, timeout=None: R()
+        class Opener:
+            def open(self, req, timeout=None):
+                return R()
+
+        saved_opener, saved_allow = appmod.netguard.opener, self.app._url_allowed
+        appmod.netguard.opener = lambda: Opener()
         self.app._url_allowed = lambda u: True
         try:
             data, mime = self.app._cover_from_url("https://e.com/c.jpg")
             self.assertEqual(mime, "image/jpeg")
             self.assertTrue(data.startswith(b"\xff\xd8\xff"))
         finally:
-            appmod.urllib.request.urlopen = saved_urlopen
+            appmod.netguard.opener = saved_opener
             self.app._url_allowed = saved_allow
 
     def test_cover_from_url_gives_up(self):

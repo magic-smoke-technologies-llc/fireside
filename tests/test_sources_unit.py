@@ -5,8 +5,10 @@ next door (test_sources.py, test_providers.py) boot a real server; this one
 never opens a socket except to a loopback server it starts itself.
 """
 
+import os
 import threading
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from host import egress as _fetch, egress_backends as _backends
@@ -272,7 +274,9 @@ class TestPlainBackend(unittest.TestCase):
 
     def test_fetch_plain_reads_text(self):
         self.assertIn("hi", _backends.fetch_plain(self.base, {}, 1000, 5, {}))
-        self.assertIn("hi", _fetch.fetch(self.base))
+        # the test server is on loopback, which fetch() refuses unless opted in
+        with mock.patch.dict(os.environ, {"FIRESIDE_ALLOW_PRIVATE_FETCH": "1"}):
+            self.assertIn("hi", _fetch.fetch(self.base))
 
 
 class TestRegistry(unittest.TestCase):
