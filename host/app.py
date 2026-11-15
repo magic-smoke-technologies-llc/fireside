@@ -4621,8 +4621,22 @@ def make_handler(app):
         def do_POST(self):
             self._dispatch(POST_ROUTES)
 
+        def log_request(self, code="-", size="-"):
+            """One line per request on stderr: who, what, how it went.
+
+            The query string is dropped before anything is printed. Several URLs
+            here carry a live capability in it (/auth/claim?token=,
+            /auth/app/session?token=, /?reset=), and a log is where those leak.
+            FIRESIDE_ACCESS_LOG=0 turns the line off.
+            """
+            if (os.environ.get("FIRESIDE_ACCESS_LOG") or "1").strip() in ("0", "false", "no"):
+                return
+            path = (self.path or "").split("?", 1)[0].split("#", 1)[0][:200]
+            print("%s %s %s %s" % (self._ip() or "-", self.command, path,
+                                   getattr(code, "value", code)), file=sys.stderr)
+
         def log_message(self, *args):
-            pass
+            pass        # protocol-level noise; log_request above is the access log
 
     return Handler
 

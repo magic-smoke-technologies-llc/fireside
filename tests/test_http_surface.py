@@ -190,6 +190,19 @@ class TestDispatch(Base):
         self.assertEqual(ip("3", "203.0.113.7"), "10.0.0.9")
         self.assertEqual(ip("x", "203.0.113.7"), "10.0.0.9")
 
+    def test_the_access_log_names_the_request_but_never_a_query_string(self):
+        import contextlib
+        import io
+        noise = io.StringIO()
+        with contextlib.redirect_stderr(noise):
+            self.status(self.get, "/auth/claim?token=SECRETCAPABILITY")
+            self.status(self.get, "/health")
+        log = noise.getvalue()
+        self.assertIn("GET /auth/claim", log)
+        self.assertIn("GET /health 200", log)
+        self.assertNotIn("SECRETCAPABILITY", log)
+        self.assertNotIn("token=", log)
+
     def test_a_handler_that_throws_is_500_and_leaks_nothing_but_a_reference(self):
         import contextlib
         import io
