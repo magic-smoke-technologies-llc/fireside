@@ -206,6 +206,19 @@ CREATE TABLE IF NOT EXISTS notifications (
     id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(128) DEFAULT '',
     kind VARCHAR(32) DEFAULT '', text TEXT, route VARCHAR(255) DEFAULT '',
     dkey VARCHAR(191) DEFAULT '', created_at VARCHAR(32), read_at VARCHAR(32) DEFAULT '');
+
+-- Every staff action that moves money or authority, in one append-only table
+-- (2026-11-14). The ledger says a balance changed. This says who changed it,
+-- whether it was applied or refused, and what the balance was either side. An
+-- audit line is never updated or deleted, and the host never derives it from
+-- the ledger after the fact.
+CREATE TABLE IF NOT EXISTS admin_audit (
+    id VARCHAR(64) PRIMARY KEY, actor_id VARCHAR(128) DEFAULT '',
+    actor_name VARCHAR(255) DEFAULT '', action VARCHAR(64) DEFAULT '',
+    target VARCHAR(128) DEFAULT '', amount DOUBLE DEFAULT 0,
+    before DOUBLE DEFAULT 0, after DOUBLE DEFAULT 0,
+    outcome VARCHAR(32) DEFAULT '', reason VARCHAR(255) DEFAULT '',
+    note TEXT, created_at VARCHAR(32), ip VARCHAR(64) DEFAULT '');
 """
 
 

@@ -42,7 +42,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from host.host import Host
 import inspect
 
-from host import accounting, allowance, auth, billing, connections, contracts, credentials, db, disambig, draft as drafts, erase, example, grants, i18n, jobs, keepwarm, library, mailer, notices, payments, playback, plans, pron, quota, ratelimit, reading, renderjob_runner, settings, stats, tags as tagmod
+from host import accounting, allowance, audit, auth, billing, connections, contracts, credentials, db, disambig, draft as drafts, erase, example, grants, i18n, jobs, keepwarm, library, mailer, notices, payments, playback, plans, pron, quota, ratelimit, reading, renderjob_runner, settings, stats, tags as tagmod
 from host.egress import fetch as _fetch
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -3192,47 +3192,65 @@ class App:
     def admin_credit(self, q, body):
         """Admin: add or remove credit on one account.
 
-        `amount` is signed: +5 adds five dollars, -5 takes five back. The
-        balance is read before and after and both values come back, so the
-        caller sees the number it produced instead of trusting the input.
+        `amount` is signed: +5 adds five dollars, -5 takes five back. Every
+        attempt writes one audit line, applied or refused, so a balance that did
+        not move still has evidence that someone tried. Both balances come back
+        on success, so the caller sees the number it produced.
         """
         uid = self._admin_only(q)
         if not uid:
             return 403, {"error": "admin only"}
         body = body or {}
         target = (body.get("user") or "").strip()
+        who = self._account_name(uid)
+        ip = (q or {}).get("_ip") or ""
+
+        def refused(code, err, amount=0.0):
+            audit.record(self.conn, uid, who, "adjust", target, amount,
+                         outcome="refused", reason=err, ip=ip)
+            return code, {"error": err}
+
         if not target:
-            return 400, {"error": "user required"}
+            return refused(400, "user required")
         row = self.conn.execute("SELECT id FROM users WHERE id=?", (target,)).fetchone()
         if not row:
-            return 404, {"error": "no such user"}
+            return refused(404, "no such user")
         try:
             amount = float(body.get("amount"))
         except (TypeError, ValueError):
-            return 400, {"error": "amount must be a number"}
+            return refused(400, "amount must be a number")
         if amount == 0:
-            return 400, {"error": "amount must not be zero"}
+            return refused(400, "amount must not be zero")
         # A fat-fingered 500 instead of 5 is the one mistake this screen invites,
         # so one entry is capped. Two entries are allowed and say so.
         if abs(amount) > 1000:
-            return 400, {"error": "one entry may be at most 1000 "
-                                  "(do it in two entries if it is real)"}
+            return refused(400, "one entry may be at most 1000 "
+                                "(do it in two entries if it is real)", amount)
         amount = round(amount, 2)
         reason = re.sub(r"\s+", " ", (body.get("note") or "")).strip()[:200]
-        who = self._account_name(uid)
         note = "%s %s%s" % (("credit by %s" % who) if amount > 0
                             else ("debit by %s" % who),
-                            ("%.2f" % amount),
+                            ("%.2f" % abs(amount)),
                             (": " + reason) if reason else "")
         before = accounting.balance(self.conn, target)
         try:
             after = accounting.adjust(self.conn, target, amount, note=note)
         except accounting.BelowZero as e:
-            return 400, {"error": "would take the balance below zero: %s" % e}
+            return refused(400, "would take the balance below zero", amount)
+        audit.record(self.conn, uid, who, "adjust", target, amount,
+                     before=before, after=after, outcome="applied",
+                     note=reason, ip=ip)
         return 200, {"ok": True, "user": target, "amount": amount,
                      "before": round(before, 2), "balance": round(after, 2),
                      "currency": accounting.currency(self.conn, target) or "USD",
                      "note": note}
+
+    def admin_audit(self, q, body):
+        """Admin: the staff action log, newest first."""
+        if not self._admin_only(q):
+            return 403, {"error": "admin only"}
+        limit = min(int((q or {}).get("limit") or 20), audit.MAX)
+        return 200, {"entries": audit.recent(self.conn, limit)}
 
     # ---- plans (admin) -------------------------------------------------------
     # An admin sets what tier an account is on without a payment. This is how a
@@ -3840,6 +3858,7 @@ GET_ROUTES = {
     "/grants": "grants_list",
     "/admin/plans": "plans_admin",
     "/admin/accounts": "admin_accounts",
+    "/admin/audit": "admin_audit",
     "/admin/billing": "admin_billing",
     "/billing": "billing_get",
     "/notifications": "notices_list",

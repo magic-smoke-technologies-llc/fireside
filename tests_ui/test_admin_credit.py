@@ -79,6 +79,29 @@ class TestAdminCredit(BrowserTest):
         reader = [a for a in out["accounts"] if a["username"] == "reader"][0]
         self.assertEqual(reader["balance"], 5.0)
 
+        # the operator's log shows the same action as a row, not a toast
+        wait_until(self.page, "() => /added/.test("
+                              "document.querySelector('#admaudit').textContent)")
+        log = self.page.inner_text("#admaudit")
+        self.assertIn("boss", log)
+        self.assertIn("reader", log)
+        self.assertIn("5.00", log)
+
+        # a refused attempt is recorded too, so the log is not only successes
+        out2 = self.page.evaluate("""async (uid) => {
+            const r = await fetch('/admin/credit', { method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user: uid, amount: -100 }) });
+            return r.status;
+        }""", reader["user_id"])
+        self.assertEqual(out2, 400)
+        log2 = self.page.evaluate("""async () => {
+            const r = await fetch('/admin/audit');
+            return await r.json();
+        }""")
+        self.assertEqual(log2["entries"][0]["outcome"], "refused")
+        self.assertEqual(log2["entries"][1]["outcome"], "applied")
+
         # and the reader's own history says who moved it
         history = page2.evaluate("""async () => {
             const r = await fetch('/credits/history');
