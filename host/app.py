@@ -4378,12 +4378,26 @@ def make_handler(app):
             here carry a live capability in it (/auth/claim?token=,
             /auth/app/session?token=, /?reset=), and a log is where those leak.
             FIRESIDE_ACCESS_LOG=0 turns the line off.
+
+            Also called for a request line that never parsed (too long, bad
+            version), before path or headers exist, so nothing here may assume
+            them, and a logging fault must never cost the response.
             """
-            if (os.environ.get("FIRESIDE_ACCESS_LOG") or "1").strip() in ("0", "false", "no"):
-                return
-            path = (self.path or "").split("?", 1)[0].split("#", 1)[0][:200]
-            print("%s %s %s %s" % (self._ip() or "-", self.command, path,
-                                   getattr(code, "value", code)), file=sys.stderr)
+            try:
+                off = (os.environ.get("FIRESIDE_ACCESS_LOG") or "1").strip()
+                if off in ("0", "false", "no"):
+                    return
+                path = getattr(self, "path", "") or ""
+                path = path.split("?", 1)[0].split("#", 1)[0][:200]
+                if getattr(self, "headers", None) is not None:
+                    ip = self._ip()
+                else:
+                    ip = self.client_address[0] if self.client_address else ""
+                print("%s %s %s %s" % (ip or "-", getattr(self, "command", "") or "-",
+                                       path or "-", getattr(code, "value", code)),
+                      file=sys.stderr)
+            except Exception:
+                pass
 
         def log_message(self, *args):
             pass        # protocol-level noise; log_request above is the access log

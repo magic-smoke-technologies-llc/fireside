@@ -203,6 +203,31 @@ class TestDispatch(Base):
         self.assertNotIn("SECRETCAPABILITY", log)
         self.assertNotIn("token=", log)
 
+    def test_a_request_line_that_never_parses_still_gets_its_status(self):
+        import contextlib
+        import io
+        import socket
+
+        def raw(data):
+            s = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+            self.addCleanup(s.close)
+            s.sendall(data)
+            chunks = []
+            while True:
+                part = s.recv(4096)
+                if not part:
+                    break
+                chunks.append(part)
+            return b"".join(chunks)
+
+        end = b"\r\n\r\n"
+        noise = io.StringIO()
+        with contextlib.redirect_stderr(noise):
+            bad_version = raw(b"GET / HTTP/9.9" + end)
+            too_long = raw(b"GET /" + b"a" * 70000 + b" HTTP/1.1" + end)
+        self.assertIn(b"505", bad_version)   # HTTP/0.9-style reply: no status line, an error body
+        self.assertIn(b" 414 ", too_long)
+
     def test_a_handler_that_throws_is_500_and_leaks_nothing_but_a_reference(self):
         import contextlib
         import io
