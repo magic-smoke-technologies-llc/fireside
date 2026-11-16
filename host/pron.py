@@ -530,6 +530,7 @@ def _regex(rules):
 # sentence around a word, narrow enough that one chapter's earlier "the" cannot
 # reach a word 400 characters later.
 WINDOW = 120
+MAX_CONDITION_CHARS = 200
 _CTX = {}
 
 
@@ -544,6 +545,10 @@ def _ctx_pat(pattern, at_end):
     if key in _CTX:
         return _CTX[key]
     try:
+        if len(pattern) > MAX_CONDITION_CHARS:
+            # A dictionary rule is typed by a user and run against every word of
+            # every chapter; a long pattern is the cheap way to make that quadratic.
+            raise re.error("condition too long")
         pat = re.compile(pattern + r"\Z" if at_end else r"\A" + pattern)
     except re.error:
         # A condition nobody can compile is a condition nothing satisfies, so

@@ -17,12 +17,15 @@ knows and ignores the rest, so the generic policy (headers, retries, backoff,
 timeout) lives in the host while a backend's own knobs live here.
 """
 
+import urllib.parse
 import urllib.request
+
+from host import netguard
 
 
 def fetch_plain(url, headers, limit, timeout, opts):
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with netguard.opener().open(req, timeout=timeout) as r:
         raw = r.read(limit)
         cs = r.headers.get_content_charset()
     return raw.decode(cs or "utf-8", "replace")
@@ -41,7 +44,16 @@ def fetch_browser(url, headers, limit, timeout, opts):
             "this source needs the 'browser' fetch backend, which uses curl_cffi "
             "(pip install curl_cffi): %s" % e)
     sess = creq.Session(impersonate=opts.get("profile") or "safari17_0")
-    r = sess.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+    # Follow redirects here, not in the client, so each hop is checked.
+    for _hop in range(netguard.MAX_REDIRECTS + 1):
+        r = sess.get(url, headers=headers, timeout=timeout, allow_redirects=False)
+        loc = r.headers.get("Location") if 300 <= r.status_code < 400 else None
+        if not loc:
+            break
+        url = urllib.parse.urljoin(url, loc)
+        netguard.check_public(url)
+    else:
+        raise RuntimeError("too many redirects")
     if r.status_code >= 400:
         raise RuntimeError("HTTP %d from %s" % (r.status_code, url))
     return r.text[:limit]

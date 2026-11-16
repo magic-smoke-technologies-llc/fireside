@@ -357,8 +357,6 @@ class TestScopes(unittest.TestCase):
         self.assertEqual(pron.token_for(text, pron.for_book(rules, "b2", "")), "")
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestContextRules(unittest.TestCase):
@@ -422,3 +420,14 @@ class TestContextRules(unittest.TestCase):
         self.assertTrue(kept.get("exact"))
         self.assertEqual(pron.apply("Cheyenne Mountain, CO", pron.load(conn, "u1")),
                          "Cheyenne Mountain, Colorado")
+
+
+class TestConditionLimit(unittest.TestCase):
+    def test_an_overlong_condition_applies_nothing_instead_of_hanging(self):
+        from host import pron
+        self.assertIsNone(pron._ctx_pat("a" * (pron.MAX_CONDITION_CHARS + 1), True))
+        self.assertIsNotNone(pron._ctx_pat("the ", True))
+
+
+if __name__ == "__main__":
+    unittest.main()

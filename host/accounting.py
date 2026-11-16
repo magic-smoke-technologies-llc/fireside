@@ -14,7 +14,7 @@ without a duplicate debit.
 import sqlite3
 import uuid
 
-from host.db import (now, savepoint, release_savepoint,
+from host.db import (now, savepoint, release_savepoint, exclusive,
                      rollback_to_savepoint)
 
 _OPEN = ("reserved", "pending")        # reservation states still holding credits
@@ -85,13 +85,29 @@ def topup(conn, user_id, amount, currency="USD", note="", entry_id=""):
     """Add credit. `entry_id` makes the credit idempotent: the ledger row's id is
     the primary key, so a second call with the same id raises IntegrityError
     instead of paying twice (a retried webhook, a re-read of the same period)."""
-    conn.execute("INSERT OR IGNORE INTO balances(user_id,currency,amount) VALUES(?,?,0)",
-                 (user_id, currency))
-    conn.execute("UPDATE balances SET amount=amount+?,currency=? WHERE user_id=?",
-                 (float(amount), currency, user_id))
-    _entry(conn, user_id, "topup", float(amount), currency, None, None, note,
-           entry_id=entry_id)
-    conn.commit()
+    # The ledger row and the balance move together or not at all. On SQLite a
+    # savepoint makes that true (and, as in reserve(), undoes only this credit on
+    # the shared connection). On MySQL, which runs autocommit, db.savepoint writes
+    # nothing, so the order carries it: the ledger row first. A repeated
+    # entry_id then raises before the balance has moved, and a failure after the
+    # ledger row leaves a row with no balance change - a credit that is missing
+    # and visible in the ledger, which support can restore with adjust(), rather
+    # than one that is paid twice. credit_once() logs that case loudly.
+    save = "topup_" + uuid.uuid4().hex[:12]
+    with exclusive(conn):         # from SAVEPOINT to commit, no other thread's savepoint
+        savepoint(conn, save)
+        try:
+            conn.execute("INSERT OR IGNORE INTO balances(user_id,currency,amount) "
+                         "VALUES(?,?,0)", (user_id, currency))
+            _entry(conn, user_id, "topup", float(amount), currency, None, None,
+                   note, entry_id=entry_id)
+            conn.execute("UPDATE balances SET amount=amount+?,currency=? "
+                         "WHERE user_id=?", (float(amount), currency, user_id))
+        except Exception:
+            rollback_to_savepoint(conn, save)
+            raise
+        release_savepoint(conn, save)
+        conn.commit()
     return balance(conn, user_id)
 
 
@@ -141,21 +157,23 @@ def reserve(conn, user_id, amount, currency="USD", job_id=None, note=""):
     # the cookie the client already holds stops resolving). A savepoint nests,
     # and rolling back to it undoes only what this reservation did.
     save = "reserve_" + uuid.uuid4().hex[:12]
-    savepoint(conn, save)
-    try:
-        avail = available(conn, user_id)
-        if avail < amount:
-            raise Insufficient("available %.4f < %.4f" % (avail, amount))
-        rid = uuid.uuid4().hex
-        conn.execute(
-            "INSERT INTO reservations(id,user_id,amount,currency,state,job_id,"
-            "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-            (rid, user_id, amount, currency, "reserved", job_id or "", now(), now()))
-    except Exception:
-        rollback_to_savepoint(conn, save)
-        raise
-    release_savepoint(conn, save)
-    conn.commit()
+    with exclusive(conn):         # no other thread's savepoint between ours and the commit
+        savepoint(conn, save)
+        try:
+            avail = available(conn, user_id)
+            if avail < amount:
+                raise Insufficient("available %.4f < %.4f" % (avail, amount))
+            rid = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO reservations(id,user_id,amount,currency,state,job_id,"
+                "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                (rid, user_id, amount, currency, "reserved", job_id or "", now(),
+                 now()))
+        except Exception:
+            rollback_to_savepoint(conn, save)
+            raise
+        release_savepoint(conn, save)
+        conn.commit()
     return rid
 
 

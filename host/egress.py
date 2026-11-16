@@ -16,6 +16,7 @@ import time
 import urllib.parse
 import urllib.request
 
+from host import netguard
 from host.egress_backends import BACKENDS, DEFAULT_BACKEND
 
 UA = "Mozilla/5.0 (compatible; reader-local/1.0; personal read-aloud)"
@@ -46,6 +47,7 @@ def fetch(url: str, cred=None, credential_hosts=(), limit: int = DEFAULT_LIMIT,
     u = urllib.parse.urlparse(url)
     if u.scheme not in ("http", "https"):
         raise ValueError("only http/https links")
+    netguard.check_public(url)      # before the retry loop: a refusal is not transient
     t = transport or {}
     backend = t.get("backend") or DEFAULT_BACKEND
     fn = BACKENDS.get(backend)
@@ -68,6 +70,8 @@ def fetch(url: str, cred=None, credential_hosts=(), limit: int = DEFAULT_LIMIT,
     for attempt in range(retries + 1):
         try:
             return fn(url, headers, limit, timeout, t)
+        except netguard.BlockedAddress:
+            raise                    # a redirect hop into a private network
         except Exception as e:
             last = e
             if attempt < retries:

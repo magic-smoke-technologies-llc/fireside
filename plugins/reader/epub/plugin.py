@@ -21,6 +21,7 @@ import re
 import hashlib
 import urllib.parse
 import zipfile
+from host import safezip
 
 from host.textutil import text_of
 
@@ -40,7 +41,7 @@ def _zip_read(z, path):
             continue
         seen.append(cand)
         try:
-            return z.read(cand)
+            return safezip.read(z, cand)
         except KeyError:
             continue
     raise KeyError(path)
@@ -185,7 +186,7 @@ def parse_epub(data: bytes, name: str) -> dict:
     opf_path = None
     if "META-INF/container.xml" in names:
         m = re.search(r'full-path="([^"]+)"',
-                      z.read("META-INF/container.xml").decode("utf-8", "replace"))
+                      safezip.read(z, "META-INF/container.xml").decode("utf-8", "replace"))
         if m:
             opf_path = html.unescape(m.group(1))
     if not opf_path:
@@ -193,7 +194,7 @@ def parse_epub(data: bytes, name: str) -> dict:
     if not opf_path:
         raise ValueError("no .opf in this epub")
 
-    opf = z.read(opf_path).decode("utf-8", "replace")
+    opf = safezip.read(z, opf_path).decode("utf-8", "replace")
     base = os.path.dirname(opf_path)
 
     title = "Untitled"

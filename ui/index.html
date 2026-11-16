@@ -7338,7 +7338,12 @@ async function sbLoadVoices() {
     const d = await jpost('/voices', { connection_id: cid });
     SB_VOICES = d.voices || [];
   } catch (e) {
-    SB_VOICES = []; sel.innerHTML = '<option value="" data-t="' + (e.message || 'voices failed') + '">' + (e.message || 'voices failed') + '</option>'; return;
+    // e.message can carry text from the voice server itself: build the option
+    // as a node so none of it is read as markup.
+    SB_VOICES = []; sel.innerHTML = '';
+    const bad = document.createElement('option');
+    bad.value = ''; bad.textContent = e.message || 'voices failed';
+    sel.appendChild(bad); return;
   }
   sel.innerHTML = '';
   fillVoices(sel, SB_VOICES, PREFS.default_voice || null);   // hear your default first

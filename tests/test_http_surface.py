@@ -15,6 +15,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+import zipfile
 from http.server import ThreadingHTTPServer
 
 from host import auth, payments, totp
@@ -122,14 +123,130 @@ class TestDispatch(Base):
         code, _ = self.status(self.post, "/import", raw=b"{not json")
         self.assertEqual(code, 400)
 
-    def test_a_handler_that_throws_is_500_with_the_reason(self):
+    def test_a_body_that_is_not_an_object_is_400_on_a_route_and_a_door(self):
+        for path in ("/import", "/auth/local/login", "/auth/forgot",
+                     "/auth/reset", "/auth/claim/confirm"):
+            code, _ = self.status(self.post, path, raw=b"[1, 2]")
+            self.assertEqual(code, 400, path)
+
+    def test_a_bad_content_length_is_400_not_a_dropped_connection(self):
+        for path in ("/import", "/auth/local/login", "/webhook/stripe"):
+            for value in ("abc", "-1"):
+                code, _ = self.status(self.post, path, raw=b"{}",
+                                      headers={"Content-Length": value})
+                self.assertEqual(code, 400, (path, value))
+
+    def test_an_oversize_body_is_413_before_it_is_read(self):
+        from host import app as appmod
+        small = (appmod.DOOR_MAX_BYTES, appmod.BODY_MAX_BYTES)
+        appmod.DOOR_MAX_BYTES, appmod.BODY_MAX_BYTES = 64, 256
+        self.addCleanup(lambda: setattr(appmod, "DOOR_MAX_BYTES", small[0]))
+        self.addCleanup(lambda: setattr(appmod, "BODY_MAX_BYTES", small[1]))
+        big = json.dumps({"pad": "x" * 1000}).encode()
+        for path in ("/import", "/auth/local/login", "/webhook/stripe"):
+            code, _ = self.status(self.post, path, raw=big)
+            self.assertEqual(code, 413, path)
+
+    def test_a_link_that_cannot_be_fetched_is_a_plain_error_not_a_500(self):
+        import urllib.error
+        from unittest import mock
+        from host import netguard
+
+        cases = [
+            (netguard.BlockedAddress("that link points at a private network address"),
+             400, "private network"),
+            (urllib.error.HTTPError("http://x", 404, "nf", {}, None), 502, "HTTP 404"),
+            (urllib.error.URLError("dns"), 502, "could not reach"),
+            (TimeoutError("slow"), 502, "could not reach"),
+            (zipfile.BadZipFile("bomb"), 422, "too large once unpacked"),
+        ]
+        for exc, want, text in cases:
+            with mock.patch.object(self.app, "_pick_reader") as pick:
+                pick.return_value.id = "fake"
+                pick.return_value.obj.read.side_effect = exc
+                for path in ("/import", "/import/preview"):
+                    code, r = self.status(self.post, path,
+                                          {"kind": "url", "url": "http://127.0.0.1:1/x"})
+                    self.assertEqual(code, want, (path, exc))
+                    self.assertIn(text, json.loads(r.read())["error"])
+
+    def test_the_caller_address_honours_trusted_proxy_hops_from_the_right(self):
+        from unittest import mock
+        from host.app import make_handler
+        h = make_handler(self.app)
+        h.headers = {}
+        h.client_address = ("10.0.0.9", 1234)
+
+        def ip(hops, xff):
+            h.headers = {"X-Forwarded-For": xff} if xff else {}
+            env = {"FIRESIDE_TRUSTED_PROXY_HOPS": hops} if hops is not None else {}
+            with mock.patch.dict(os.environ, env):
+                return h._ip(h)
+
+        # no setting: the socket peer, and a forged header buys nothing
+        self.assertEqual(ip(None, "6.6.6.6"), "10.0.0.9")
+        # one proxy appended the real caller last; the client's own claim is left of it
+        self.assertEqual(ip("1", "6.6.6.6, 203.0.113.7"), "203.0.113.7")
+        self.assertEqual(ip("2", "6.6.6.6, 203.0.113.7, 10.1.1.1"), "203.0.113.7")
+        # fewer entries than hops: do not guess, use the peer
+        self.assertEqual(ip("3", "203.0.113.7"), "10.0.0.9")
+        self.assertEqual(ip("x", "203.0.113.7"), "10.0.0.9")
+
+    def test_the_access_log_names_the_request_but_never_a_query_string(self):
+        import contextlib
+        import io
+        noise = io.StringIO()
+        with contextlib.redirect_stderr(noise):
+            self.status(self.get, "/auth/claim?token=SECRETCAPABILITY")
+            self.status(self.get, "/health")
+        log = noise.getvalue()
+        self.assertIn("GET /auth/claim", log)
+        self.assertIn("GET /health 200", log)
+        self.assertNotIn("SECRETCAPABILITY", log)
+        self.assertNotIn("token=", log)
+
+    def test_a_request_line_that_never_parses_still_gets_its_status(self):
+        import contextlib
+        import io
+        import socket
+
+        def raw(data):
+            s = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+            self.addCleanup(s.close)
+            s.sendall(data)
+            chunks = []
+            while True:
+                part = s.recv(4096)
+                if not part:
+                    break
+                chunks.append(part)
+            return b"".join(chunks)
+
+        end = b"\r\n\r\n"
+        noise = io.StringIO()
+        with contextlib.redirect_stderr(noise):
+            bad_version = raw(b"GET / HTTP/9.9" + end)
+            too_long = raw(b"GET /" + b"a" * 70000 + b" HTTP/1.1" + end)
+        self.assertIn(b"505", bad_version)   # HTTP/0.9-style reply: no status line, an error body
+        self.assertIn(b" 414 ", too_long)
+
+    def test_a_handler_that_throws_is_500_and_leaks_nothing_but_a_reference(self):
+        import contextlib
+        import io
+
         def boom(q, body):
-            raise RuntimeError("kaboom")
+            raise RuntimeError("kaboom SELECT secret FROM t")
 
         self.app.health = boom
-        code, r = self.status(self.get, "/health")
+        noise = io.StringIO()
+        with contextlib.redirect_stderr(noise):
+            code, r = self.status(self.get, "/health")
         self.assertEqual(code, 500)
-        self.assertIn("kaboom", r.read().decode())
+        body = json.loads(r.read())
+        self.assertNotIn("kaboom", json.dumps(body))
+        self.assertEqual(body["error"], "internal error")
+        self.assertIn(body["ref"], noise.getvalue())         # the log has the key
+        self.assertIn("kaboom", noise.getvalue())            # and the reason
 
     def test_a_session_lookup_that_throws_is_503_and_logged(self):
         """The lookup runs before routing, outside any handler's try, so a raise
@@ -146,8 +263,9 @@ class TestDispatch(Base):
                 code, r = self.status(self.get, "/library")
         self.assertEqual(code, 503)
         body = json.loads(r.read())
-        self.assertIn("db gone", body["error"])
-        self.assertIn("db gone", noise.getvalue())      # and it went in the log too
+        self.assertNotIn("db gone", json.dumps(body))   # the client gets no detail
+        self.assertIn("db gone", noise.getvalue())      # the log does
+        self.assertIn(body["ref"], noise.getvalue())
 
     def test_html_response_shape(self):
         r = self.get("/privacy")
