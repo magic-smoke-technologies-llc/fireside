@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-import host.app as hostapp
+import host.routes_static as hostapp   # the module that reads ASSETS_DIR
 from host.app import App, make_handler
 from tests.test_pluginhost import write_plugin
 
