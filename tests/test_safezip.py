@@ -29,6 +29,23 @@ class TestSafeZip(unittest.TestCase):
         z = make_zip({"edge": b"x" * 1000})
         self.assertEqual(len(safezip.read(z, "edge", limit=1000)), 1000)
 
+    def test_the_default_limit_is_read_when_called_not_when_defined(self):
+        from unittest import mock
+        z = make_zip({"m": b"y" * 5000})
+        with mock.patch.object(safezip, "MEMBER_LIMIT", 100):
+            with self.assertRaises(zipfile.BadZipFile):
+                safezip.read(z, "m")
+
+    def test_a_docx_whose_body_is_a_bomb_is_refused_not_parsed(self):
+        from unittest import mock
+        from host import docx_import
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as w:
+            w.writestr("word/document.xml", b"<a>" + b"x" * 5000 + b"</a>")
+        with mock.patch.object(safezip, "MEMBER_LIMIT", 100):
+            with self.assertRaises(zipfile.BadZipFile):
+                docx_import.extract(buf.getvalue())
+
     def test_a_missing_member_is_still_a_key_error(self):
         with self.assertRaises(KeyError):
             safezip.read(make_zip({"a": b"1"}), "nope")

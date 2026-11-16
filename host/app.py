@@ -38,6 +38,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from host.host import Host
@@ -885,7 +886,7 @@ class App:
         except contracts.Refused as e:
             return e.status, self._refusal(e, user, plugin)
         except Exception as e:
-            failed = self._fetch_error(e)
+            failed = self._import_error(e)
             if failed is None:
                 raise
             return failed
@@ -922,7 +923,7 @@ class App:
             # so in its own words. That is a 422 with a reason, not a 500.
             return e.status, self._refusal(e, user, plugin)
         except Exception as e:
-            failed = self._fetch_error(e)
+            failed = self._import_error(e)
             if failed is None:
                 raise
             return failed
@@ -1036,7 +1037,7 @@ class App:
         except contracts.Refused as e:
             return e.status, self._refusal(e, user, plugin)
         except Exception as e:
-            failed = self._fetch_error(e)
+            failed = self._import_error(e)
             if failed is None:
                 raise
             return failed
@@ -1643,13 +1644,17 @@ class App:
                 continue
         return None
 
-    def _fetch_error(self, e):
-        """(status, body) for a link that could not be fetched, else None.
+    def _import_error(self, e):
+        """(status, body) for an import that failed on the user's input, else None.
 
-        These are the user's link failing, not the server: a refused address is
-        theirs to fix (400) and an unreachable or erroring site is upstream (502).
-        Anything else is a bug and stays a 500.
+        A link that cannot be fetched is the user's link failing, not the
+        server: a refused address is theirs to fix (400) and an unreachable or
+        erroring site is upstream (502). A file that is not a usable zip, or
+        inflates past the member limit, is a 422. Anything else is a bug and
+        stays a 500.
         """
+        if isinstance(e, zipfile.BadZipFile):
+            return 422, {"error": "that file is damaged, or too large once unpacked"}
         if isinstance(e, netguard.BlockedAddress):
             return 400, {"error": str(e)}
         if isinstance(e, urllib.error.HTTPError):

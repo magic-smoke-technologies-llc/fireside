@@ -15,6 +15,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+import zipfile
 from http.server import ThreadingHTTPServer
 
 from host import auth, payments, totp
@@ -157,6 +158,7 @@ class TestDispatch(Base):
             (urllib.error.HTTPError("http://x", 404, "nf", {}, None), 502, "HTTP 404"),
             (urllib.error.URLError("dns"), 502, "could not reach"),
             (TimeoutError("slow"), 502, "could not reach"),
+            (zipfile.BadZipFile("bomb"), 422, "too large once unpacked"),
         ]
         for exc, want, text in cases:
             with mock.patch.object(self.app, "_pick_reader") as pick:

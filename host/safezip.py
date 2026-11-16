@@ -11,12 +11,13 @@ import zipfile
 MEMBER_LIMIT = 64 * 1024 * 1024     # a chapter or a document body, with room to spare
 
 
-def read(z, name, limit=MEMBER_LIMIT):
+def read(z, name, limit=None):
     """z.read(name), or BadZipFile when the member inflates past `limit`.
 
     BadZipFile is what every reader already treats as "not a usable file", so a
     bomb is refused the same way a corrupt archive is.
     """
+    limit = MEMBER_LIMIT if limit is None else limit
     with z.open(name) as f:
         data = f.read(limit + 1)
     if len(data) > limit:
