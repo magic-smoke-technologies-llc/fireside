@@ -118,5 +118,36 @@ class TestClaimPayment(unittest.TestCase):
         self.assertEqual(accounting.balance(real, "u"), 5)
 
 
+    def test_concurrent_credits_and_a_failing_one_do_not_undo_each_other(self):
+        """One shared connection: a failing credit's rollback must undo only its
+        own writes, not a credit another thread has in flight."""
+        import threading
+        errors = []
+
+        def good(i):
+            try:
+                accounting.topup(self.app.conn, "u", 1, currency="chars",
+                                 entry_id="good%d" % i)
+            except Exception as e:      # pragma: no cover - the failure we test for
+                errors.append(e)
+
+        def bad(i):
+            try:
+                accounting.topup(self.app.conn, "u", 1, currency="chars",
+                                 entry_id="dup")        # second one is refused
+            except Exception:
+                pass
+
+        accounting.topup(self.app.conn, "u", 1, currency="chars", entry_id="dup")
+        ts = []
+        for i in range(30):
+            ts.append(threading.Thread(target=good, args=(i,)))
+            ts.append(threading.Thread(target=bad, args=(i,)))
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        self.assertEqual(errors, [])
+        self.assertEqual(accounting.balance(self.app.conn, "u"), 31)
+
+
 if __name__ == "__main__":
     unittest.main()

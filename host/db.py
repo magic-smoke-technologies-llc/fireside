@@ -30,6 +30,7 @@ import os
 import re
 import sqlite3
 import sys
+import contextlib
 import threading
 import time
 import urllib.parse
@@ -625,6 +626,19 @@ def now():
 # the invisible rows first, the visible row last), because on autocommit there
 # is no rollback to lean on and one shared connection means a real transaction
 # would be another thread's transaction too.
+
+def exclusive(conn):
+    """A context that keeps other threads off `conn` from here to its commit.
+
+    The wrapper's lock is held per statement, so two threads' savepoints can
+    interleave on the one shared connection: one's RELEASE closes the other's,
+    one's ROLLBACK TO undoes the other's writes. A caller that opens a savepoint
+    and means to roll back only its own work holds this around the whole of it.
+    The lock is reentrant, so the statements inside still take it. An engine
+    without such a lock (a bare connection) gets a no-op.
+    """
+    return getattr(conn, "_lock", None) or contextlib.nullcontext()
+
 
 def nested_transactions(conn):
     """Whether a savepoint on `conn` actually holds. False on MySQL."""
