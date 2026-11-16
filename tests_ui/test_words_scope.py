@@ -47,6 +47,49 @@ class TestWordsScope(BrowserTest):
         self.assertEqual(r, ["/pron/impact?book=b1", "/pron/impact"],
                          "the default check left the book it was standing in")
 
+    def test_a_saved_rule_keeps_the_scope_it_was_saved_with(self):
+        # Cat opened the words editor on the book she was listening to and every
+        # older word came back as "Only: this book". Nothing on the server had
+        # changed; #264 read a blank scope (the whole library) as a missing one
+        # and filled in the book on screen. Saving in that state would have
+        # narrowed every library-wide word to one book.
+        self.register("wordsscope3")
+        r = self.page.evaluate("""() => {
+          book = { id: 'b1', title: 'One Book' };
+          player = { id: '', title: '', chapters: [] };
+          SCOPEBOOKS = [{ id: 'b1', title: 'One Book' },
+                        { id: 'b2', title: 'Other Book' }];
+          SCOPEAUTHORS = []; SCOSERIES = [];
+          showPron([{ from: 'DoD', to: 'dee oh dee' },
+                    { from: 'Hermione', to: 'Her-my-oh-nee', book: 'b2' }]);
+          const shown = [...document.querySelectorAll('#pronrows .pscope')]
+                          .map(s => s.value);
+          collectPron();
+          return { shown: shown,
+                   saved: PRON.map(r => [r.from, r.book || ''] ) };
+        }""")
+        self.assertEqual(r["shown"], ["", "book:b2"],
+                         "a library-wide word was relabelled as this-book-only")
+        # the round trip is the receipt: what a Save would write back must keep
+        # the library-wide word library-wide
+        self.assertEqual(r["saved"],
+                         [["DoD", ""], ["Hermione", "b2"]],
+                         "a Save would have narrowed a library-wide word")
+
+    def test_a_new_row_still_starts_on_the_open_book(self):
+        self.register("wordsscope4")
+        r = self.page.evaluate("""() => {
+          book = { id: 'b1', title: 'One Book' };
+          player = { id: '', title: '', chapters: [] };
+          SCOPEBOOKS = [{ id: 'b1', title: 'One Book' }];
+          SCOPEAUTHORS = []; SCOSERIES = [];
+          document.getElementById('pronadd').click();
+          return [...document.querySelectorAll('#pronrows .pscope')]
+                   .map(s => s.value);
+        }""")
+        self.assertEqual(r, ["book:b1"],
+                         "a newly typed word no longer follows the open book")
+
 
 if __name__ == "__main__":
     unittest.main()

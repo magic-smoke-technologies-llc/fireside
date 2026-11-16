@@ -2663,8 +2663,13 @@ function collectPron() {
 }
 function showPron(rules) {
   $('#pronrows').innerHTML = '';
-  (rules && rules.length ? rules : [{ from: '', to: '' }])
-    .forEach(r => pronRow(r.from, r.to, scopeValue(r) || defaultScope()));
+  // A saved rule with no book, author or series is scoped to the whole library,
+  // and that empty scope is a real choice, not a missing value. Filling it with
+  // the book on screen (#264 did) relabels every library-wide rule as this-book-
+  // only, and the next Save writes that narrowing back. Rows carry their own
+  // scope; only a genuinely new row starts from the book that is open.
+  if (!rules || !rules.length) { pronRow('', '', defaultScope()); return; }
+  rules.forEach(r => pronRow(r.from, r.to, scopeValue(r)));
 }
 let PRONMODEL = [];
 async function loadPron() {
