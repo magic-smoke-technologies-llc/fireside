@@ -89,5 +89,34 @@ class TestClaimPayment(unittest.TestCase):
         self.assertEqual(accounting.balance(self.app.conn, "u"), 5)
 
 
+    def test_a_balance_write_that_fails_after_the_ledger_row_is_rolled_back(self):
+        """topup must be all or nothing, or a retry finds the ledger row, takes
+        the duplicate branch and the customer is never credited."""
+        real = self.app.conn
+        state = {"failed": False}
+
+        class Flaky:
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def execute(self, sql, *a):
+                if sql.lstrip().startswith("UPDATE balances") and not state["failed"]:
+                    state["failed"] = True
+                    raise RuntimeError("deadlock")
+                return real.execute(sql, *a)
+
+        self.app.conn = Flaky()
+
+        def credit(eid):
+            accounting.topup(self.app.conn, "u", 5, currency="chars", entry_id=eid)
+
+        with self.assertRaises(RuntimeError):
+            self.app._credit_once("evt7", "characters", "u", "evt7", 5, "t", credit)
+        self.assertTrue(self.app._credit_once(
+            "evt7", "characters", "u", "evt7", 5, "t", credit),
+            "the retry must credit, not report a duplicate")
+        self.assertEqual(accounting.balance(real, "u"), 5)
+
+
 if __name__ == "__main__":
     unittest.main()

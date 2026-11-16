@@ -5,6 +5,8 @@ place one kind of provider event becomes ledger or subscription rows, and each i
 safe to run twice: a webhook retry and the browser's own confirm can both land.
 """
 
+import sys
+
 from host import accounting, billing, db, quota
 
 
@@ -56,10 +58,18 @@ def credit_once(conn, event_id, kind, uid, reference, chars, detail, credit):
             credit("pay:" + event_id.strip())
         except Exception as e:
             if db.is_duplicate(e):
-                return False     # the ledger already holds this payment
+                # The ledger holds this payment but our claim was new: an
+                # earlier attempt wrote the ledger row and then failed before
+                # the balance moved (only possible on MySQL, which cannot roll
+                # the pair back). Do not pay twice; say so, so support can check
+                # the balance and restore it with adjust().
+                print("fireside: ALERT payment %s is in the ledger but its "
+                      "claim was released; check the balance of %s"
+                      % (event_id.strip(), uid), file=sys.stderr)
+                return False
             try:
                 conn.execute("DELETE FROM payment_events WHERE id=?",
-                                  (event_id.strip(),))
+                             (event_id.strip(),))
                 conn.commit()
             except Exception:
                 pass        # keep the original failure, not this one
