@@ -54,6 +54,18 @@ def _refused():
 
 
 class VoiceServerTest(unittest.TestCase):
+    # The backoff is a module constant and test_jobs.py sets it to 0 so its own
+    # suite does not wait; discovery order decides whether that leaks here. The
+    # shipped default is asserted, so pin it and put it back.
+    SHIPPED_BACKOFF = 1.5
+
+    def setUp(self):
+        self._saved = (jobs.SYNTH_BACKOFF, jobs.SYNTH_ATTEMPTS)
+        jobs.SYNTH_BACKOFF, jobs.SYNTH_ATTEMPTS = self.SHIPPED_BACKOFF, 4
+
+    def tearDown(self):
+        jobs.SYNTH_BACKOFF, jobs.SYNTH_ATTEMPTS = self._saved
+
     def test_refused_gets_a_longer_window_and_a_readable_message(self):
         slept = []
         sp = _Speech([_refused(), _refused(), _refused(), _refused()])

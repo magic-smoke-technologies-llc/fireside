@@ -7158,9 +7158,12 @@ function setTransportMini(on) {
   const b = $('#tmin');
   if (b) {
     b.textContent = on ? '▴' : '▾';
-    const lbl = on ? 'Show player' : 'Hide player';
+    // Two strings, two jobs: the key stays English so the language switcher
+    // can translate it again, and T() is what a translator can reach.
+    const key = on ? 'Show player' : 'Hide player';
+    const lbl = on ? T('Show player') : T('Hide player');
     b.setAttribute('aria-label', lbl); b.title = lbl;
-    b.setAttribute('data-t-aria', lbl); b.setAttribute('data-t-title', lbl);
+    b.setAttribute('data-t-aria', key); b.setAttribute('data-t-title', key);
   }
   try { localStorage.setItem(TMIN_KEY, on ? '1' : '0'); } catch (e) {}
 }

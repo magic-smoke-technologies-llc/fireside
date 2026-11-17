@@ -45,7 +45,10 @@ def chunk_text(text, target=CHUNK_TARGET):
             cur += para + "\n\n"
     if cur.strip():
         parts.append(cur.strip())
-    return [p for p in (parts or [text]) if p]
+    # An empty chapter still answers with one (empty) chunk, which is the
+    # contract every caller reads; the splitter never hands back a blank.
+    parts = [p for p in parts if p]
+    return parts or [text]
 
 
 def has_speech(text):
