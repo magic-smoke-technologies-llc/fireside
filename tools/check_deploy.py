@@ -29,6 +29,12 @@ import urllib.request
 
 # Keys whose live value is a bool. Checked as booleans, so "false" really means
 # false rather than the truthy string "false".
+#
+# Kept as a fallback, not as the rule. /health grows a switch now and then, and
+# a new one nobody added here falls through to the string compare: the box
+# answers JSON true, the deploy expects "true", str(True) != "true", and a
+# correct deploy is reported REJECTED (11-17, render_job). So the rule is the
+# type: a bool on either side is compared as a bool.
 BOOL_KEYS = {"hosted", "require_auth", "payments_configured", "sale_connection",
               "render_job", "ok"}
 
@@ -68,7 +74,7 @@ def compare(live, expect, expect_build=None, need_readers=()):
             rows.append((key, want, "<missing>", False))
             continue
         actual = live.get(key)
-        if key in BOOL_KEYS:
+        if key in BOOL_KEYS or isinstance(actual, bool) or isinstance(want, bool):
             ok = _as_bool(actual) == _as_bool(want)
         else:
             ok = str(actual) == str(want)
