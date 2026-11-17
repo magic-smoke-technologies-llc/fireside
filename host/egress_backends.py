@@ -23,6 +23,25 @@ import urllib.request
 from host import netguard
 
 
+class HttpStatusError(RuntimeError):
+    """A non-2xx answer, with the status and the head of the body attached.
+
+    The retry loop has no business guessing what a site meant, and the host
+    must not learn one site's vocabulary. So the backend hands the raw facts
+    over (status, url, a short body) and a source that knows its site can name
+    the cause in the user's words (AO3's "Shields are up!" page is a 403 that
+    is not a refusal of that link at all).
+    """
+
+    SNIPPET = 3000
+
+    def __init__(self, status, url, body=""):
+        super().__init__("HTTP %d from %s" % (status, url))
+        self.status = status
+        self.url = url
+        self.body = (body or "")[:self.SNIPPET]
+
+
 def fetch_plain(url, headers, limit, timeout, opts):
     req = urllib.request.Request(url, headers=headers)
     with netguard.opener().open(req, timeout=timeout) as r:
@@ -43,20 +62,37 @@ def fetch_browser(url, headers, limit, timeout, opts):
         raise RuntimeError(
             "this source needs the 'browser' fetch backend, which uses curl_cffi "
             "(pip install curl_cffi): %s" % e)
-    sess = creq.Session(impersonate=opts.get("profile") or "safari17_0")
-    # Follow redirects here, not in the client, so each hop is checked.
-    for _hop in range(netguard.MAX_REDIRECTS + 1):
-        r = sess.get(url, headers=headers, timeout=timeout, allow_redirects=False)
-        loc = r.headers.get("Location") if 300 <= r.status_code < 400 else None
-        if not loc:
-            break
-        url = urllib.parse.urljoin(url, loc)
-        netguard.check_public(url)
-    else:
-        raise RuntimeError("too many redirects")
-    if r.status_code >= 400:
-        raise RuntimeError("HTTP %d from %s" % (r.status_code, url))
-    return r.text[:limit]
+    # One fingerprint can go stale: the same site that answers a Safari
+    # profile can hang a Chrome one for a minute and then the other way round.
+    # A source may name a list ("profiles"); each is tried once, first answer
+    # wins, and the last failure is what the caller sees.
+    main = opts.get("profile") or "safari17_0"
+    order = [main] + [p for p in (opts.get("profiles") or []) if p != main]
+    last = None
+    for prof in order:
+        sess = creq.Session(impersonate=prof)
+        try:
+            # Follow redirects here, not in the client, so each hop is checked.
+            at = url
+            for _hop in range(netguard.MAX_REDIRECTS + 1):
+                r = sess.get(at, headers=headers, timeout=timeout, allow_redirects=False)
+                loc = r.headers.get("Location") if 300 <= r.status_code < 400 else None
+                if not loc:
+                    break
+                at = urllib.parse.urljoin(at, loc)
+                netguard.check_public(at)
+            else:
+                raise RuntimeError("too many redirects")
+        except netguard.BlockedAddress:
+            raise
+        except Exception as e:
+            last = e
+            continue
+        if r.status_code >= 400:
+            last = HttpStatusError(r.status_code, at, r.text)
+            continue
+        return r.text[:limit]
+    raise last
 
 
 BACKENDS = {

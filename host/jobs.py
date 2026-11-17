@@ -78,6 +78,33 @@ def release_cancel(job_id):
         _CANCELS.pop(job_id, None)
 
 
+class VoiceServerUnavailable(RuntimeError):
+    """The speech server was not there when we knocked.
+
+    A local engine (Kokoro on a tower) goes away while it restarts, and a
+    tunnel in front of it drops the connection for a few seconds. The raw
+    traceback for that is `<urlopen error [Errno 111] Connection refused>`,
+    which tells a reader nothing. This says what happened and what to do.
+    """
+
+_CONNECTION_WAITS = (3.0, 8.0, 15.0)   # a restart takes seconds, not 1.5
+
+
+def _is_connection_loss(e):
+    """A refused/reset/dropped connection, as opposed to a bad request."""
+    seen = []
+    cur = e
+    for _ in range(4):
+        if cur is None:
+            break
+        seen.append(cur)
+        cur = getattr(cur, "reason", None) or getattr(cur, "__cause__", None)
+    text = " ".join(str(x).lower() for x in seen)
+    return ("connection refused" in text or "connection reset" in text
+            or "errno 111" in text or "errno 104" in text
+            or "remote end closed" in text)
+
+
 def _synth(speech, text, voice, opts, cred, attempts=None, backoff=None,
            should_stop=None, sleep=time.sleep):
     """Speak one chunk, retrying a dropped request with exponential backoff.
@@ -90,6 +117,7 @@ def _synth(speech, text, voice, opts, cred, attempts=None, backoff=None,
     backoff = SYNTH_BACKOFF if backoff is None else backoff
     attempts = max(1, int(attempts))
     last = None
+    waits = []
     for n in range(attempts):
         if should_stop and should_stop():
             raise Cancelled()
@@ -100,7 +128,16 @@ def _synth(speech, text, voice, opts, cred, attempts=None, backoff=None,
             if n < attempts - 1:
                 if should_stop and should_stop():
                     raise Cancelled()
-                sleep(max(0.0, backoff) * (2 ** n))
+                if _is_connection_loss(e):
+                    # the server is down or restarting: give it real seconds
+                    waits.append(_CONNECTION_WAITS[min(n, len(_CONNECTION_WAITS) - 1)])
+                else:
+                    waits.append(max(0.0, backoff) * (2 ** n))
+                sleep(waits[-1])
+    if _is_connection_loss(last):
+        raise VoiceServerUnavailable(
+            "the voice server refused the connection, so it was down or "
+            "restarting; check the connection is answering, then convert again") from last
     raise last
 
 

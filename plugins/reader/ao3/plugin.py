@@ -11,7 +11,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from host.contracts import Field, to_book
+from host.contracts import Field, Refused, to_book
 
 
 import re
@@ -61,11 +61,13 @@ def parse_ao3(page: str, url: str) -> dict:
     # a login page or the adult gate means we do not have the work body
     if 'id="workskin"' not in page and "chapter-" not in page:
         if re.search(r'(?i)id="login"|name="user\[login\]"', page):
-            raise ValueError("AO3 says log in for this work. Paste your AO3 session "
-                             "cookie in Source settings, or use the work's Download -> EPUB.")
+            raise Refused("AO3 says log in for this work",
+                          "Paste your AO3 session cookie in Source settings, or use the "
+                          "work's Download -> EPUB and import that file.")
         if "view_adult" in page and "This work could have adult content" in page:
-            raise ValueError("AO3 showed the adult gate. Try the link again.")
-        raise ValueError("no work body on that page (not a work, or a login wall)")
+            raise Refused("AO3 showed the adult gate", "Try the link again.")
+        raise Refused("no work text on that page",
+                      "That page is not a work, or AO3 is showing a login wall.")
 
     title = "Untitled"
     m = _WTITLE.search(page)
@@ -102,7 +104,9 @@ def parse_ao3(page: str, url: str) -> dict:
                 chapters.append({"title": ctitle or title[:120] or "Chapter 1", "text": text})
 
     if not chapters:
-        raise ValueError("could not find any chapter text (AO3 markup may have changed)")
+        raise Refused("could not find any chapter text",
+                      "AO3's page structure may have changed. Use the work's "
+                      "Download -> EPUB and import that file.")
     return {"title": title, "chapters": chapters}
 
 
@@ -115,13 +119,42 @@ class Ao3:
 
     def read(self, req, fetch, cred=None) -> dict:
         url = req["url"]
-        page = fetch(full_work_url(url), cred=cred, credential_hosts=self.credential_hosts())
+        try:
+            page = fetch(full_work_url(url), cred=cred,
+                         credential_hosts=self.credential_hosts())
+        except Exception as e:
+            self._refuse_fetch(e)
+            raise
         book = parse_ao3(page, url)
         book["meta"] = {"source": self.id, "url": url}
         wid = work_id(url)
         if wid:
             book["meta"]["identity"] = "ao3:" + wid
         return to_book(book)
+
+    def _refuse_fetch(self, e):
+        """Name the fetch failure the way the reader needs to hear it.
+
+        AO3 raises its shields when it is under load: every work page becomes
+        a 403 with "Shields are up!" on it. That is site-wide and temporary, so
+        the link is fine and retrying will not help this minute. The status and
+        body head arrive from the host's fetch, which does not know AO3; the
+        knowing belongs here, next to the parser that does.
+        """
+        status = getattr(e, "status", None)
+        body = getattr(e, "body", "") or ""
+        if "Shields are up" in body or "shields are up" in body:
+            raise Refused(
+                "AO3 has its shields up right now",
+                "That is AO3's own protection while they are under load, not a "
+                "problem with your link. Wait a while and try the link again, or use "
+                "the work's Download -> EPUB and import that file.",
+                status=502)
+        if status in (403, 429):
+            raise Refused(
+                "AO3 refused that link (HTTP %d)" % status,
+                "If the work is locked, paste your AO3 session cookie in Source "
+                "settings. Otherwise use the work's Download -> EPUB.", status=502)
 
     def same(self, stored, incoming) -> bool:
         a = (stored or {}).get("identity") or ""
@@ -147,7 +180,8 @@ class Ao3:
         # which browser to imitate. Retries+backoff because the gate is also
         # rate-sensitive: a burst flips a good request to 525.
         return {"backend": "browser", "profile": "safari17_0",
-                "retries": 4, "backoff": 1.5, "timeout": 60}
+                "profiles": ["safari17_0", "chrome124"],
+                "retries": 1, "backoff": 1.5, "timeout": 20}
 
     def credential_hosts(self):
         return ["archiveofourown.org"]

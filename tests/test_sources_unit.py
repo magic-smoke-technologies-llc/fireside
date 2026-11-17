@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from host import egress as _fetch, egress_backends as _backends
 from plugins.reader.ao3 import plugin as ao3
+from host.contracts import Refused
 from plugins.reader.web import plugin as web
 from sources import describe, ingest, request_key
 from plugins.reader.epub.plugin import Epub
@@ -61,18 +62,21 @@ class TestAo3Parse(unittest.TestCase):
         self.assertEqual(len(b["chapters"]), 1)
         self.assertEqual(b["chapters"][0]["title"], "One Shot")
 
+    # These are refusals, not crashes: a ValueError here used to reach the
+    # host unclassified and become a 500, so the reader saw "something went
+    # wrong on our side" instead of the reason and the way out.
     def test_login_wall_says_what_to_do(self):
-        with self.assertRaises(ValueError) as c:
+        with self.assertRaises(Refused) as c:
             ao3.parse_ao3(AO3_LOGIN, "https://archiveofourown.org/works/3")
-        self.assertIn("session cookie", str(c.exception))
+        self.assertIn("session cookie", c.exception.detail)
 
     def test_adult_gate(self):
-        with self.assertRaises(ValueError) as c:
+        with self.assertRaises(Refused) as c:
             ao3.parse_ao3(AO3_ADULT, "https://archiveofourown.org/works/4")
-        self.assertIn("adult gate", str(c.exception))
+        self.assertIn("adult gate", c.exception.error)
 
     def test_no_body(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(Refused):
             ao3.parse_ao3(AO3_EMPTY, "https://archiveofourown.org/works/5")
 
     def test_url_matching(self):
