@@ -60,6 +60,21 @@ def test_a_field_that_vanished_fails():
     assert rows[0][3] is False and rows[0][2] == "<missing>", rows
 
 
+def test_a_boolean_field_added_later_is_read_as_a_boolean():
+    """A /health bool that is not in BOOL_KEYS is still a bool.
+
+    11-17: render_job answered JSON true while the deploy expected "true", and
+    str(True) != "true" made the gate call a correct deploy rejected. Every
+    fact was right and the receipt was wrong, which is the worst direction for
+    a gate to be wrong in.
+    """
+    c = _checker()
+    rows = c.compare({"later_switch": True}, {"later_switch": "true"})
+    assert rows[0][3] is True, rows
+    rows = c.compare({"later_switch": False}, {"later_switch": "true"})
+    assert rows[0][3] is False, rows
+
+
 def test_a_reader_that_did_not_load_fails():
     c = _checker()
     rows = c.compare({"readers": [{"id": "epub"}]}, {}, None, ("pdf",))
