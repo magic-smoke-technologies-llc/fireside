@@ -520,6 +520,31 @@
   #transport .ttime{color:var(--faint);font-variant-numeric:tabular-nums;font-size:12px}
   #transport .vol{display:flex;align-items:center;gap:6px;flex:0 0 auto;color:var(--soft);font-size:12px}
   #transport .vol input{width:90px;padding:0;border:0;background:none}
+  #transport .tmin{flex:none;background:none;border:1px solid transparent;border-radius:9px;color:var(--soft);cursor:pointer;padding:7px 8px;font-size:12px;line-height:1}
+  #transport .tmin:hover{color:var(--text);border-color:var(--line)}
+  /* A collapsed player: only play and the way back out, tucked into the
+     bottom-right corner. The full bar is 55px of fixed height across the
+     whole width, and anything sitting under it (a Save, a Convert, the last
+     row of a table) became unreachable. Rolling it away is the reader's own
+     choice, so it is a button and it remembers. */
+  body.transportmini #transport{left:auto;right:16px;bottom:16px;width:auto;
+    border:1px solid var(--line);border-radius:999px;padding:6px 8px;
+    box-shadow:0 10px 30px #0009;gap:8px}
+  body.transportmini #transport #tprev,
+  body.transportmini #transport #tback,
+  body.transportmini #transport #tfwd,
+  body.transportmini #transport #tnext,
+  body.transportmini #transport #tqueue,
+  body.transportmini #transport .tnow,
+  body.transportmini #transport .ttime,
+  body.transportmini #transport .vol{display:none}
+  body.transportmini #transport .tplay{width:34px;height:34px;font-size:14px}
+  body.transportmini .foot{padding-bottom:30px}
+  body.transportmini #ribbon{bottom:0}
+  body.transportmini #toasts{bottom:64px}
+  body.transportmini #queuedrawer{bottom:70px}
+  body.hastransport main{padding-bottom:64px}
+  body.transportmini main{padding-bottom:0}
   body.hastransport #ribbon{bottom:55px}
   body.hastransport #toasts{bottom:112px}
   /* --- per-user stats, tucked behind the account chip -------------------- */
@@ -966,6 +991,7 @@
       margin-top:4px;padding-bottom:8px}
     header #who{grid-area:who;margin-left:0;align-self:center}
     #transport{flex-wrap:wrap;row-gap:4px;padding:8px 10px}
+    body.transportmini #transport{left:auto;right:10px;bottom:10px;flex-wrap:nowrap;padding:6px 8px}
     #transport .tplay{width:34px;height:34px}
     #transport .tnav,#transport .tq{padding:6px 8px}
     #transport .vol{margin-left:auto}
@@ -1684,6 +1710,7 @@ gtag('consent', 'default', {ad_storage: 'denied', ad_user_data: 'denied',
   <span class="ttime" id="ttimes" aria-hidden="true"></span>
   <span class="sr-only" id="tstatus" role="status" aria-live="polite"></span>
   <label class="vol" title="Volume" data-t-title="Volume">Vol<input id="tvol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" data-t-aria="Volume"></label>
+  <button class="tmin" id="tmin" type="button" title="Hide player" data-t-title="Hide player" aria-label="Hide player" data-t-aria="Hide player">▾</button>
 </div>
 <div id="queuedrawer" hidden>
   <div class="qh"><h3 data-t="Queue">Queue</h3><button class="x" id="qclose" type="button" aria-label="Close" data-t-aria="Close">×</button></div>
@@ -7122,6 +7149,23 @@ function chapterStep(dir) {
   }
   idle('No ' + (dir < 0 ? 'previous' : 'next') + ' chapter is voiced in this voice yet.');
 }
+/* Roll the transport away. A fixed 55px bar across the width covers whatever
+   is underneath it; the reader decides when it is in the way, and the choice
+   survives a reload. Nothing stops playing when it is put away. */
+const TMIN_KEY = 'fs.transport.mini';
+function setTransportMini(on) {
+  document.body.classList.toggle('transportmini', !!on);
+  const b = $('#tmin');
+  if (b) {
+    b.textContent = on ? '▴' : '▾';
+    const lbl = on ? 'Show player' : 'Hide player';
+    b.setAttribute('aria-label', lbl); b.title = lbl;
+    b.setAttribute('data-t-aria', lbl); b.setAttribute('data-t-title', lbl);
+  }
+  try { localStorage.setItem(TMIN_KEY, on ? '1' : '0'); } catch (e) {}
+}
+$('#tmin').onclick = () => setTransportMini(!document.body.classList.contains('transportmini'));
+try { if (localStorage.getItem(TMIN_KEY) === '1') setTransportMini(true); } catch (e) {}
 $('#tplay').onclick = () => { if (!player.id || pcur < 0) return; $a.paused ? $a.play().catch(()=>{}) : $a.pause(); };
 $('#tprev').onclick = () => chapterStep(-1);
 $('#tnext').onclick = () => chapterStep(1);
